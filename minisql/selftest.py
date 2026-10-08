@@ -34,8 +34,13 @@ def _checks():
     backend = keyring.get_keyring()
     name = type(backend).__name__
     if "fail" in type(backend).__module__ or name == "NullKeyring":
-        raise RuntimeError(f"el llavero no tiene un backend útil ({name})")
-    yield "keyring", name
+        # En Windows (donde se usa el .exe) siempre hay llavero: si falta, el empaquetado está mal.
+        # En Linux sin escritorio (p. ej. GitHub Actions) no hay; la app funciona, solo sin guardar contraseñas.
+        if sys.platform == "win32":
+            raise RuntimeError(f"el llavero no tiene un backend útil ({name})")
+        yield "keyring", f"sin llavero del sistema ({name}): no se guardarán contraseñas"
+    else:
+        yield "keyring", name
 
     from .sql.text import format_sql
     yield "sqlparse", format_sql("select a,b from t where x=1").splitlines()[0]

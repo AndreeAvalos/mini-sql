@@ -1,2 +1,3 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Normalizar fin de línea a LF en el repositorio
+* text=auto eol=lf
+*.png binary

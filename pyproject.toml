@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=77"]  # licencia como texto SPDX (PEP 639)
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "minisql"
+version = "0.1.0"
+description = "Cliente de escritorio para Oracle: hojas SQL, explorador de objetos, autocompletado, edición y depuración PL/SQL."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Andree Avalos" }]
+requires-python = ">=3.10"
+keywords = ["oracle", "sql", "plsql", "database", "client", "pyside6", "debugger"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Natural Language :: Spanish",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database :: Front-Ends",
+]
+dependencies = [
+    "PySide6>=6.6",
+    "oracledb>=2.0",
+    "keyring>=24",
+    "sqlparse>=0.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.gui-scripts]
+minisql = "minisql.app:main"
+
+[project.urls]
+Repositorio = "https://github.com/AndreeAvalos/mini-sql"
+Problemas = "https://github.com/AndreeAvalos/mini-sql/issues"
+
+[tool.setuptools.packages.find]
+include = ["minisql*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+    "B008",    # QModelIndex() como valor por defecto es el patrón de Qt
+    "SIM905",  # las listas de palabras clave se leen mejor como texto con split()
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E702", "RUF012"]   # simuladores compactos de una línea por método
+"docs/generar_capturas.py" = ["E402"]   # importa la app después de crear QApplication
+
+[tool.ruff.lint.isort]
+known-first-party = ["minisql"]
+known-local-folder = ["support"]

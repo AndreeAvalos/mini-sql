@@ -11,7 +11,7 @@ from PySide6.QtCore import QObject, Signal
 
 from ..db.debug import DebugSession
 from ..db.session import read_dbms_output
-from ..sql.plsql import variable_candidates
+from ..sql.plsql import backtrace_line, debug_wrapper, same_code, variable_candidates
 
 # Códigos de DBMS_DEBUG.LIBUNITTYPE_* (por si la traducción en PL/SQL no llega)
 LIBUNIT_TYPES = {7: "PROCEDURE", 8: "FUNCTION", 9: "PACKAGE", 11: "PACKAGE BODY", 12: "TRIGGER"}
@@ -43,7 +43,10 @@ class PlsqlDebugger(QObject):
             return
         self.active = self.running = True
         self.target = target
-        self.block_lines = block.count("\n") + 1
+        block = debug_wrapper(block)
+        self.block_text = block.split("\n")
+        self.block_lines = len(self.block_text)
+        self.target_source = None
         self.warned = False
         self.commands = queue.Queue()
         self.bps = {bp: None for bp in breakpoints}
@@ -113,10 +116,7 @@ class PlsqlDebugger(QObject):
                     except oracledb.Error as e:
                         res["error"] = str(e)
                     res["elapsed"] = time.perf_counter() - t0
-                    st["block_done"].set()
-                    st["detached"].wait(10)
-                    with contextlib.suppress(oracledb.Error):
-                        cur.execute("begin dbms_debug.debug_off; end;")
+                    st["block_done"].set()           # el bloque ya hizo DEBUG_OFF (ver debug_wrapper)
                     with contextlib.suppress(Exception):
                         res["output"] = read_dbms_output(cur)
                     self.db.output_enabled = True   # el depurador activó DBMS_OUTPUT en la sesión
@@ -128,6 +128,7 @@ class PlsqlDebugger(QObject):
 
     MAX_HIDDEN_STEPS = 200
     WAIT_S = 2                        # espera máxima por evento antes de revisar si el código terminó
+    TARGET_WAIT_S = 15                # al terminar: cuánto esperar a la sesión principal antes de cancelarla
     FINISHED: ClassVar[dict] = {"line": 0, "owner": None, "name": None, "utype": None, "done": 1}
 
     def _wait_event(self, ds, info):
@@ -161,7 +162,7 @@ class PlsqlDebugger(QObject):
         utype = LIBUNIT_TYPES.get(lut)
         if info.get("name"):
             utype = utype or ds.unit_type(info["owner"], info["name"])
-        elif self.target and info["line"] > self.block_lines:
+        elif self.target and self._in_target(ds, info["line"]):
             utype, info["owner"], info["name"] = self.target
         if utype:
             info["utype"] = utype
@@ -170,6 +171,20 @@ class PlsqlDebugger(QObject):
                 self.message.emit(f"Oracle no indicó la unidad de la pausa (tipo={lut}, programa={reported}); "
                                   f"se asume {info['owner']}.{info['name']} ({utype.lower()}).")
         return info
+
+    def _in_target(self, ds, line):
+        """¿La pausa sin nombre de programa es en el código depurado o en el bloque de prueba?
+        La pila de DBMS_DEBUG trae el texto de la línea actual: se compara con ambos."""
+        current = backtrace_line(ds.backtrace())
+        if current and current[0] == line and current[1]:
+            if self.target_source is None:
+                kind, owner, name = self.target
+                self.target_source = ds.source(owner, name, kind).split("\n")
+            in_target = line <= len(self.target_source) and same_code(current[1], self.target_source[line - 1])
+            in_block = line <= self.block_lines and same_code(current[1], self.block_text[line - 1])
+            if in_target != in_block:
+                return in_target
+        return line > self.block_lines          # sin texto útil: una línea fuera del bloque es del objeto
 
     # --- sesión que depura (nueva)
     def _debugger(self, st, compile_targets):
@@ -240,8 +255,11 @@ class PlsqlDebugger(QObject):
                 ds.detach()
             st["detached"].set()
             if ds is not None:
-                if st["started"]:
-                    st["target_done"].wait(30)
+                if st["started"] and not st["target_done"].wait(self.TARGET_WAIT_S):
+                    # red de seguridad: la sesión principal nunca debe quedar retenida por la depuración
+                    self.message.emit("La sesión principal no terminó; se canceló su llamada para liberarla.")
+                    self.db.cancel()
+                    st["target_done"].wait(10)
                 ds.close()
             result = dict(st["result"])
             if error and "error" not in result:

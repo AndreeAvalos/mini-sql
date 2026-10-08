@@ -73,7 +73,7 @@ class FakeCursor:
     def execute(self, sql, *args, **kwargs):
         self.sql, self.kw = sql.lower(), kwargs
         FakeCursor.executed.append(sql)
-        if getattr(self, "debugging", False) and "dbms_debug" not in self.sql:
+        if getattr(self, "debugging", False) and "dbms_debug.initialize" not in self.sql:
             # como en Oracle: el bloque depurado no termina hasta que el depurador lo deja terminar
             FakeDebugSession.finished.wait(10)
             self.debugging = False
@@ -178,6 +178,7 @@ class FakeDebugSession:
 
     def __init__(self, conn):
         self.calls = []
+        self.at = (1, False)                      # (línea, ¿en el paquete?) de la última pausa
         self.synced = False
         FakeDebugSession.last = self
         FakeDebugSession.finished = threading.Event()
@@ -195,8 +196,15 @@ class FakeDebugSession:
     def set_breakpoint(self, *key): self.calls.append(("bp", *key)); return 7
     def delete_breakpoint(self, bp): self.calls.append(("del", bp))
     def variables(self, names): return [("V_X", "42")]
-    def backtrace(self): return "PKG.ALTA línea 4"
-    def source(self, *a): return "v_x := 42;"
+    def backtrace(self):
+        """Como Oracle 19c: "[Line N] texto de la línea" del marco actual; el bloque de prueba sin texto."""
+        line, in_pkg = self.at
+        if not in_pkg:
+            return f"[Line {line}]\n<source not available>"
+        return f"[Line {line}]  {self.source('', 'PKG', 'PACKAGE BODY').split(chr(10))[line - 1]}"
+
+    def source(self, owner, name, utype):
+        return "".join(text for typ, text in PKG_SOURCE if typ == utype)
     def detach(self): self.calls.append(("detach",))
     def unit_type(self, owner, name): self.calls.append(("unit_type", owner, name)); return "PACKAGE BODY"
     def close(self): pass
@@ -209,6 +217,12 @@ class FakeDebugSession:
         return self._next()
 
     def _next(self):
+        info = self._event()
+        if "line" in info:
+            self.at = (info["line"], bool(info.get("name")) or self.kind_in_pkg)
+        return info
+
+    def _event(self):
         """Siguiente evento del guion. "timeout": Oracle no avisó nada; "finish": el programa terminó en la
         sesión principal pero Oracle no avisa (luego solo hay timeouts); None: Oracle avisa que terminó."""
         line = self.script.pop(0) if self.script else "timeout"
@@ -219,6 +233,7 @@ class FakeDebugSession:
         if line is None:
             FakeDebugSession.finished.set()
             return {"line": 0, "owner": None, "name": None, "utype": None, "done": 1}
+        self.kind_in_pkg = not isinstance(line, tuple) or line[0] != "anon"
         if isinstance(line, tuple):
             kind, n = line
             if kind == "anon":                   # detenido en el bloque de prueba

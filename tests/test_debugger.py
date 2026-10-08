@@ -1,9 +1,12 @@
 """Depuración PL/SQL."""
 
+import threading
+
 from minisql.ui.connection_tab import ConnectionTab
+from minisql.ui.debugger import PlsqlDebugger
 from minisql.ui.editors import CodeEditor
 
-from support import FakeConn, FakeDebugSession, make_session, wait_until
+from support import FakeConn, FakeCursor, FakeDebugSession, make_session, wait_until
 
 
 def test_debug_session_flow(app):
@@ -114,13 +117,14 @@ def test_pause_without_unit_info_uses_the_debugged_object(app):
     assert wait_until(app, lambda: panel.location.text() == "Terminado")
 
 
-def test_pause_inside_test_block_lines_is_still_the_test_block(app):
-    tab, _code = open_pkg_for_debug(app)
-    FakeDebugSession.script = [("noname", 2), 4, None]   # línea 2: cabe en el bloque de prueba
+def test_pause_located_by_the_line_text_in_the_stack(app):
+    """Sin nombre de programa y en una línea baja (podría ser del bloque de prueba): la pila de Oracle trae
+    el texto de la línea, y como es "PROCEDURE ALTA IS" del paquete, la pausa es en el paquete."""
+    tab, code = open_pkg_for_debug(app)
+    FakeDebugSession.script = [("noname", 2), None]
     tab.start_debug(BLOCK, [], target=TARGET)
-    assert wait_until(app, lambda: "línea 4" in tab.debug_panel.location.text())
-    steps = [c[1] for c in FakeDebugSession.last.calls if c[0] == "step"]
-    assert steps == ["into", "into"]                      # la línea 2 se saltó como bloque de prueba
+    assert wait_until(app, lambda: code.exec_line == 7)          # línea 2 del cuerpo = línea 7 del editor
+    assert "SCOTT.PKG (package body)" in tab.debug_panel.location.text()
     tab.debug_panel.do("continue")
     assert wait_until(app, lambda: tab.debug_panel.location.text() == "Terminado")
 
@@ -196,3 +200,53 @@ def test_debug_can_run_again_after_it_ends(app):
         assert wait_until(app, lambda: panel.location.text() == "Terminado")
         assert not tab.debugger.active and not tab.db.busy
         assert ("bp", "PACKAGE BODY", "SCOTT", "PKG", 4) in FakeDebugSession.last.calls   # el breakpoint sigue
+
+
+def test_debug_off_runs_inside_the_debugged_call(app):
+    """Un DEBUG_OFF en una llamada aparte se quedaba esperando al depurador y retenía la sesión principal."""
+    tab, code = open_pkg_for_debug(app)
+    FakeCursor.executed.clear()
+    FakeDebugSession.script = [4, None]
+    tab.start_debug(BLOCK, [], target=TARGET)
+    assert wait_until(app, lambda: code.exec_line == 9)
+    tab.debug_panel.do("continue")
+    assert wait_until(app, lambda: tab.debug_panel.location.text() == "Terminado")
+    blocks = [sql for sql in FakeCursor.executed if "SCOTT.PKG.ALTA" in sql]
+    assert len(blocks) == 1 and blocks[0].count("DBMS_DEBUG.DEBUG_OFF") == 2
+    assert not any(sql.strip().lower() == "begin dbms_debug.debug_off; end;" for sql in FakeCursor.executed)
+    assert not tab.db.busy
+
+
+class StuckConn(FakeConn):
+    """La sesión principal se queda atrapada en el bloque depurado hasta que la cancelan."""
+
+    def __init__(self):
+        self.release = threading.Event()
+        self.cancelled = False
+
+    def cursor(self):
+        conn = self
+
+        class StuckCursor(FakeCursor):
+            def execute(self, sql, *a, **k):
+                if "DBMS_DEBUG.DEBUG_OFF" in sql:
+                    conn.release.wait(10)
+                    raise RuntimeError("ORA-01013: el usuario ha solicitado la cancelación")
+                return super().execute(sql, *a, **k)
+        return StuckCursor()
+
+    def cancel(self):
+        self.cancelled = True
+        self.release.set()
+
+
+def test_main_session_is_never_left_stuck_after_debugging(app, monkeypatch):
+    monkeypatch.setattr(PlsqlDebugger, "TARGET_WAIT_S", 0.3)
+    conn = StuckConn()
+    tab = ConnectionTab(make_session(conn, opener=FakeConn), "T", "PROD")
+    tab.debugger.session_factory = FakeDebugSession
+    FakeDebugSession.script = [None]                 # Oracle avisa que terminó, pero la sesión principal no
+    tab.start_debug(BLOCK, [], target=TARGET)
+    assert wait_until(app, lambda: not tab.debugger.active and "Terminó" in tab.debug_panel.location.text())
+    assert conn.cancelled and not tab.db.busy        # se canceló sola: la conexión quedó libre
+    assert "se canceló su llamada" in tab.debug_panel.output.toPlainText()

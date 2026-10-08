@@ -92,6 +92,29 @@ def plsql_type(data_type, type_owner=None, type_name=None, type_subname=None):
     return data_type or "VARCHAR2(32767)"
 
 
+def debug_wrapper(block: str) -> str:
+    """Envuelve el bloque de prueba para que la sesión salga del modo de depuración dentro de la misma
+    llamada, termine bien, con error o detenida. Un DEBUG_OFF en una llamada aparte se quedaría esperando
+    a un depurador que ya se fue, y la sesión principal quedaría bloqueada."""
+    body = "\n".join("    " + line if line.strip() else "" for line in block.strip().split("\n"))
+    if not body.rstrip().endswith(";"):
+        body += ";"
+    return ("BEGIN\n  BEGIN\n" + body + "\n  EXCEPTION WHEN OTHERS THEN\n    DBMS_DEBUG.DEBUG_OFF;\n"
+            "    RAISE;\n  END;\n  DBMS_DEBUG.DEBUG_OFF;\nEND;")
+
+
+def backtrace_line(backtrace: str):
+    """(línea, texto) del marco actual en la pila de DBMS_DEBUG, p. ej. "[Line 15]  RETURN X;", o None."""
+    m = re.match(r"\s*\[Line (\d+)\]\s*(.*)", backtrace or "")
+    return (int(m.group(1)), m.group(2).strip()) if m else None
+
+
+def same_code(a: str, b: str) -> bool:
+    """True si dos líneas de código son la misma sin importar espacios (la pila puede recortarlas)."""
+    a, b = " ".join(a.split()), " ".join(b.split())
+    return bool(a) and bool(b) and (a == b or a.startswith(b) or b.startswith(a))
+
+
 def debug_template(owner, package, subprogram, args):
     """Bloque anónimo para llamar al subprograma.
     args: [(argumento, posición, modo, data_type, type_owner, type_name, type_subname)] de una sobrecarga."""

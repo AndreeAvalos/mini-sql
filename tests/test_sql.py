@@ -5,9 +5,12 @@ from minisql.db.session import read_dbms_output
 from minisql.db.tns import parse_tnsnames
 from minisql.sql.completion import completion_target, make_alias, rank_completions, table_refs, wants_alias
 from minisql.sql.plsql import (
+    backtrace_line,
     debug_template,
+    debug_wrapper,
     editor_line,
     map_errors,
+    same_code,
     split_units,
     unit_at_line,
     unit_info,
@@ -133,3 +136,17 @@ def test_word_at():
     assert word_at("  v_total := v_total + 1;", 4) == "v_total"
     assert word_at("  v_total := 1;", 10) == ""
     assert word_at("x$ab#1 := 2", 0) == "x$ab#1"
+
+
+def test_debug_wrapper_and_stack_text():
+    wrapped = debug_wrapper("BEGIN\n  pkg.alta;\nEND;")
+    assert wrapped.startswith("BEGIN\n  BEGIN\n    BEGIN\n      pkg.alta;")
+    assert "EXCEPTION WHEN OTHERS THEN\n    DBMS_DEBUG.DEBUG_OFF;\n    RAISE;" in wrapped
+    assert wrapped.endswith("  DBMS_DEBUG.DEBUG_OFF;\nEND;")
+    assert debug_wrapper("pkg.alta").count("pkg.alta;") == 1          # agrega el ; que falte
+    assert backtrace_line("[Line 15]          DBMS_OUTPUT.PUT_LINE('x');\n<source not available>") == \
+        (15, "DBMS_OUTPUT.PUT_LINE('x');")
+    assert backtrace_line("<source not available>") is None
+    assert same_code("  RETURN   V_RESULTADO;", "RETURN V_RESULTADO;")
+    assert same_code("SELECT LISTAGG(RV_LOW_VALUE, ',') WITHIN", "SELECT LISTAGG(RV_LOW_VALUE, ',') WITHIN GROUP")
+    assert not same_code("", "END;") and not same_code("NULL;", "END;")

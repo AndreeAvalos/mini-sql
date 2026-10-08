@@ -101,6 +101,7 @@ Todo queda en tu carpeta de usuario, en `~/.minisql/`, y **nunca se guardan cont
 | `config.json` | Ruta del `tnsnames.ora` |
 | `sesion/indice.json` | Conexiones abiertas y orden de las hojas |
 | `sesion/<CONEXIÓN>/<hoja>.sql` | El texto de cada hoja (se escribe solo cuando cambia) |
+| `minisql.lock` | Evita abrir MiniSQL dos veces (dos ventanas se pisarían el autoguardado) |
 
 ## Desarrollo
 

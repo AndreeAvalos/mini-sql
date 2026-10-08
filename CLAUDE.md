@@ -76,5 +76,7 @@ Detalles útiles:
 - No guardar contraseñas en archivos.
 - Agregar o actualizar pruebas en `tests/` cuando cambie el comportamiento; `ruff check .` sin avisos.
 - Si cambia la interfaz, regenerar las capturas del README (`docs/generar_capturas.py`).
+- Una sola instancia (`app.single_instance_lock`, QLockFile en ~/.minisql/minisql.lock): dos SessionKeeper
+  sobre la misma carpeta se pisarían. El ejecutable (.exe) y `python main.py` comparten ~/.minisql.
 - Nunca perder trabajo del usuario: todo estado nuevo que el usuario escriba (hojas, código) debe entrar en
   `ConnectionTab.snapshot()` / `restore()` para que el guardián de sesión lo recupere.

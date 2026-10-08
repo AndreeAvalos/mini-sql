@@ -187,3 +187,5 @@ conexiones.json
 sesion/
 sesion.json
 .ruff_cache/
+# El .spec de PyInstaller sí se versiona (la plantilla de arriba ignora *.spec)
+!packaging/MiniSQL.spec

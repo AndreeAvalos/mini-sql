@@ -37,7 +37,13 @@ explorador de objetos, autocompletado, edición y compilación de paquetes, y de
 
 ![Depuración PL/SQL detenida en un breakpoint](docs/img/depuracion.png)
 
-## Instalación
+## Descarga (Windows)
+
+Descarga `MiniSQL.exe` de la última versión en [Releases](https://github.com/AndreeAvalos/mini-sql/releases/latest)
+y ábrelo: no necesita Python ni Oracle Client. Al ser un ejecutable sin firma digital, Windows SmartScreen puede
+avisar la primera vez («Más información» → «Ejecutar de todas formas»).
+
+## Instalación desde el código
 
 Requiere Python 3.10 o superior.
 
@@ -104,6 +110,15 @@ pytest            # pruebas con conexiones simuladas: no necesitan Oracle
 ruff check .      # estilo y errores comunes
 python docs/generar_capturas.py   # vuelve a generar las imágenes de este README
 ```
+
+### Publicar una versión
+
+1. Sube el número en `version` de `pyproject.toml` (por ejemplo `0.2.0`) y haz commit.
+2. Crea y sube la etiqueta: `git tag v0.2.0` y `git push origin v0.2.0`.
+
+GitHub Actions corre las pruebas, compila `MiniSQL.exe` con PyInstaller (`packaging/MiniSQL.spec`), lo verifica con
+`MiniSQL.exe --self-test` y lo publica en Releases. Para compilarlo localmente:
+`pip install pyinstaller` y `pyinstaller packaging/MiniSQL.spec`; queda en `dist/`.
 
 El código está organizado en capas: `minisql/sql` (texto SQL, sin Oracle ni Qt), `minisql/db` (todo lo que
 habla con Oracle, en hilos) y `minisql/ui` (interfaz Qt). [CLAUDE.md](CLAUDE.md) describe cada módulo y las

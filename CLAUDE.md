@@ -13,6 +13,10 @@ La interfaz, los mensajes y los comentarios están en español.
 
 GitHub Actions (`.github/workflows/tests.yml`) corre ruff y pytest en Windows y Linux con Python 3.10 y 3.13.
 Dependencias: `pyproject.toml` es la fuente; requirements*.txt las repiten para instalar rápido.
+Ejecutable: `packaging/MiniSQL.spec` (PyInstaller, un .exe sin consola). `.github/workflows/release.yml` lo compila,
+corre `MiniSQL.exe --self-test` (`minisql/selftest.py`) y lo publica en Releases al subir una etiqueta `vX.Y.Z` igual
+a la versión de pyproject.toml. Si se agrega una dependencia que se importa en tiempo de ejecución o desde código
+compilado (como `cryptography` en el modo thin de oracledb), declararla en `hiddenimports` del .spec y cubrirla en selftest.
 
 ## Estructura
 

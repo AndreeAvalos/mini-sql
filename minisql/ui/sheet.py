@@ -31,6 +31,7 @@ from ..sql.text import (
     strip_comments,
 )
 from .editors import SqlEditor
+from .find_bar import with_find_bar
 from .results import ResultModel, ResultView
 from .style import StatusLabel, mono_font
 from .workers import Emitter
@@ -99,7 +100,9 @@ class SheetWidget(QWidget):
         bar.addWidget(self.status, 1)
 
         splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(self.editor)
+        editor_box = with_find_bar(self.editor)         # Ctrl+F buscar, Ctrl+H reemplazar
+        self.find_bar = editor_box.find_bar
+        splitter.addWidget(editor_box)
         splitter.addWidget(self.result_tabs)
         splitter.setSizes([300, 400])
 

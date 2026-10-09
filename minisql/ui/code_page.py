@@ -20,6 +20,7 @@ from ..sql.plsql import debug_template, editor_line, map_errors, unit_at_line
 from ..sql.text import IDENT, norm_ident
 from .debug_panel import DebugStartDialog
 from .editors import CodeEditor
+from .find_bar import with_find_bar
 from .results import ResultView
 from .style import ERROR_COLOR, MUTED_COLOR, OK_COLOR, WARN_COLOR
 
@@ -58,7 +59,9 @@ class CodePage(QWidget):
         self.errors.doubleClicked.connect(
             lambda idx: self.editor.go_to_line(*self.errors.model().rows[idx.row()][:2]))
         split = QSplitter(Qt.Vertical)
-        split.addWidget(self.editor)
+        editor_box = with_find_bar(self.editor)         # Ctrl+F buscar, Ctrl+H reemplazar
+        self.find_bar = editor_box.find_bar
+        split.addWidget(editor_box)
         split.addWidget(self.errors)
         split.setSizes([500, 120])
 

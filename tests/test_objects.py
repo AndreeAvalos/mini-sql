@@ -32,14 +32,14 @@ def test_object_viewer(app):
     cols = viewer.pages["Columnas"].model()
     assert cols.rowCount() == 2 and cols.rows[0][1] == "ID" and cols.rows[0][5] == "🔑"
     assert cols.rows[1][2] == "VARCHAR2(50)" and cols.rows[1][4] == "'x'"
-    viewer.tabs.setCurrentWidget(viewer.pages["Datos"])
+    viewer.show_tab("Datos")
     pump(app)
     assert viewer.pages["Datos"].model().rowCount() == 2
-    viewer.tabs.setCurrentWidget(viewer.pages["Detalles"])
+    viewer.show_tab("Detalles")
     pump(app)
     props = dict(viewer.pages["Detalles"].model().rows)
     assert props["Nombre"] == "EMP" and props["Estado"] == "VALID"
-    viewer.tabs.setCurrentWidget(viewer.pages["DDL"])
+    viewer.show_tab("DDL")
     pump(app)
     assert "CREATE TABLE" in viewer.pages["DDL"].toPlainText()
     # abrir otra vez el mismo objeto no duplica la pestaña; la hoja de SQL sigue disponible

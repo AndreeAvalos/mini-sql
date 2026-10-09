@@ -22,6 +22,7 @@ explorador de objetos, autocompletado, edición y compilación de paquetes, y de
 - **Autocompletado** de palabras clave, funciones, esquemas, tablas, columnas, paquetes y secuencias. Entiende los
   alias del `FROM`/`JOIN`, sigue sinónimos y agrega el alias al completar una tabla o una columna.
 - **Colores de sintaxis** y **formateo** de SQL (Ctrl+Shift+F).
+- **Buscar y reemplazar** (Ctrl+F / Ctrl+H) en hojas, código y DDL, con expresiones regulares.
 - **DBMS_OUTPUT** en cada hoja; acepta `SET SERVEROUTPUT ON` y `EXEC procedimiento` como en SQL*Plus.
 - **Explorador de objetos** con filtro, y **visor** de tablas, vistas, paquetes, procedimientos, secuencias,
   índices…: columnas, datos, índices, restricciones, detalles y DDL. F4 abre el objeto bajo el cursor.
@@ -77,6 +78,8 @@ el llavero del sistema (Administrador de credenciales de Windows, Keychain de ma
 | Ctrl+Enter | Ejecutar la sentencia del cursor o el texto seleccionado |
 | Ctrl+Espacio | Autocompletar |
 | Ctrl+Shift+F | Formatear la sentencia del cursor |
+| Ctrl+F / Ctrl+H | Buscar / reemplazar (mayúsculas, palabra completa, expresión regular) |
+| F3 / Shift+F3 | Siguiente / anterior resultado de la búsqueda |
 | F4 | Abrir el objeto cuyo nombre está bajo el cursor |
 | Ctrl+T / Ctrl+W | Nueva hoja / cerrar hoja |
 | Ctrl+N | Nueva conexión |

@@ -30,6 +30,7 @@ Capas de abajo hacia arriba; una capa nunca importa de una superior.
         text.py            comentarios, separar sentencias (líneas en blanco), identificadores, format_sql
         completion.py      qué se está escribiendo, alias del FROM/JOIN, ranking de sugerencias
         plsql.py           unidades PL/SQL separadas por '/', líneas unidad ↔ editor, plantilla de depuración
+        search.py          buscar/reemplazar (opciones, regex, QtPositions: índices Python ↔ posiciones UTF-16 de Qt)
       db/                todo lo que habla con Oracle; corre en hilos, sin Qt
         session.py         OracleSession: sesión principal + de metadatos, candados, execute, commit/rollback,
                            cancel, DBMS_OUTPUT (read_dbms_output)
@@ -45,7 +46,9 @@ Capas de abajo hacia arriba; una capa nunca importa de una superior.
         explorer.py        árbol de esquemas > categorías > objetos, con carga perezosa
         object_viewer.py   pestaña de un objeto (OBJECT_TABS dice qué pestañas tiene cada tipo)
         code_page.py       pestaña Código: editar, compilar, errores, breakpoints, iniciar depuración
-        editors.py         SqlEditor (colores + autocompletado) y CodeEditor (margen, breakpoints)
+        editors.py         SqlEditor (colores + autocompletado) y CodeEditor (margen, breakpoints).
+                           Resaltados por capas con set_highlights(capa, ...): exec, find, find_current
+        find_bar.py        FindBar (Ctrl+F/Ctrl+H/F3/Esc); with_find_bar(editor) devuelve el contenedor
         completion.py      CompletionProvider: caché de metadatos para sugerencias
         debugger.py        PlsqlDebugger: hilos y cola de órdenes de la depuración
         debug_panel.py     DebugPanel, DebugStartDialog y DebugController (une depurador e interfaz)

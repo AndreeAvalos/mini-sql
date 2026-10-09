@@ -41,6 +41,7 @@ class SqlEditor(QPlainTextEdit):
         self.dark = is_dark(self)
         self.highlighter = SqlHighlighter(self.document(), self.dark)
         self.provider = provider
+        self.highlight_layers = {}   # capa -> resaltados (ExtraSelection); ver set_highlights
         self.prefix = ""
         self.alias_taken = None      # alias ya usados si se está escribiendo una tabla en FROM/JOIN
         self.waiting = None          # None, o True/False (manual) si esperamos metadatos
@@ -52,6 +53,17 @@ class SqlEditor(QPlainTextEdit):
         self.completer.activated[QModelIndex].connect(self.insert_completion)
         if provider is not None:
             provider.updated.connect(self._on_metadata)
+
+    # Orden de pintado: lo de más abajo queda encima (la búsqueda se ve sobre la línea del depurador)
+    LAYER_ORDER = ("exec", "find", "find_current")
+
+    def set_highlights(self, layer, selections):
+        """Resaltados de una capa (línea del depurador, resultados de búsqueda…); cada capa reemplaza
+        solo los suyos, así no se borran entre sí."""
+        self.highlight_layers[layer] = list(selections)
+        ordered = sorted(self.highlight_layers.items(),
+                         key=lambda kv: self.LAYER_ORDER.index(kv[0]) if kv[0] in self.LAYER_ORDER else 99)
+        self.setExtraSelections([sel for _layer, sels in ordered for sel in sels])
 
     def _on_metadata(self):
         if self.waiting is not None and self.hasFocus():
@@ -288,7 +300,7 @@ class CodeEditor(SqlEditor):
             self.setTextCursor(cur)
             self.centerCursor()
             self.setFocus()
-        self.setExtraSelections(sels)
+        self.set_highlights("exec", sels)
         self.gutter.update()
 
     def go_to_line(self, line, column=1):

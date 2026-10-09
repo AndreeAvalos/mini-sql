@@ -7,6 +7,7 @@ from ..db.object_tabs import Text, fetch_object_tab
 from ..sql.text import q
 from .code_page import CodePage
 from .editors import CodeEditor
+from .find_bar import with_find_bar
 from .results import ResultView
 from .style import StatusLabel
 from .workers import Emitter
@@ -65,10 +66,11 @@ class ObjectViewer(QWidget):
             if label == "DDL":
                 page = CodeEditor()
                 page.setReadOnly(True)
+                self.tabs.addTab(with_find_bar(page), label)   # Ctrl+F para buscar en el DDL
             else:
                 page = ResultView()
+                self.tabs.addTab(page, label)
             self.pages[label] = page
-            self.tabs.addTab(page, label)
         self.loaded = set()
 
         layout = QVBoxLayout(self)
@@ -117,6 +119,11 @@ class ObjectViewer(QWidget):
             self.code.clear_exec_line()
 
     # --- carga de pestañas
+    def show_tab(self, label):
+        """Muestra la pestaña interna con ese nombre (Columnas, Datos, DDL…)."""
+        labels = [self.tabs.tabText(i) for i in range(self.tabs.count())]
+        self.tabs.setCurrentIndex(labels.index(label))
+
     def current_label(self):
         return self.tabs.tabText(self.tabs.currentIndex())
 

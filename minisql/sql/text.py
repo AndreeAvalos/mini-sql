@@ -145,6 +145,82 @@ def blank_literals(sql: str) -> str:
     return re.sub(r"'(?:[^']|'')*'", "''", sql)
 
 
+_SLASH_LINE = re.compile(r"[ \t]*/[ \t]*(?:\n|$)")       # una '/' sola en su línea (fin de bloque PL/SQL)
+_Q_CLOSE = {"[": "]", "(": ")", "{": "}", "<": ">"}
+
+
+def _skip_noise(sql: str, i: int) -> int:
+    """Posición del primer carácter de código desde i (salta espacios y comentarios)."""
+    n = len(sql)
+    while i < n:
+        if sql[i].isspace():
+            i += 1
+        elif sql.startswith("--", i):
+            j = sql.find("\n", i)
+            i = n if j < 0 else j + 1
+        elif sql.startswith("/*", i):
+            j = sql.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+        else:
+            break
+    return i
+
+
+def _literal_end(sql: str, j: int):
+    """Si en j empieza un comentario, una cadena ('…', q'[…]') o un identificador entre comillas, devuelve
+    la posición donde termina; si no, None."""
+    n = len(sql)
+    if sql.startswith("--", j):
+        k = sql.find("\n", j)
+        return n if k < 0 else k
+    if sql.startswith("/*", j):
+        k = sql.find("*/", j + 2)
+        return n if k < 0 else k + 2
+    c = sql[j]
+    if c in "qQ" and sql[j + 1:j + 2] == "'" and j + 2 < n and (j == 0 or not (sql[j - 1].isalnum() or
+                                                                         sql[j - 1] in "_$#")):
+        close = _Q_CLOSE.get(sql[j + 2], sql[j + 2]) + "'"
+        k = sql.find(close, j + 3)
+        return n if k < 0 else k + 2
+    if c == "'":
+        k = string_end(sql, j + 1)
+        return n if k < 0 else k
+    if c == '"':
+        k = sql.find('"', j + 1)
+        return n if k < 0 else k + 1
+    return None
+
+
+def split_statements(sql: str):
+    """Separa un script en sentencias, como SQL*Plus: SQL termina en ';' y los bloques PL/SQL (BEGIN,
+    DECLARE, CREATE PROCEDURE…) en una '/' sola en su línea o al final del texto. Ignora ';' dentro de
+    cadenas, comentarios e identificadores entre comillas. Devuelve las sentencias sin el ';' final del SQL
+    (los bloques PL/SQL conservan su 'END;') y sin los trozos que solo tienen comentarios."""
+    out, i, n = [], 0, len(sql)
+    while True:
+        start = _skip_noise(sql, i)
+        if start >= n:
+            return out
+        plsql = bool(PLSQL_START.match(sql[start:start + 300]))
+        j, end, nxt = start, n, n
+        while j < n:
+            skip = _literal_end(sql, j)
+            if skip is not None:
+                j = skip
+                continue
+            if j > start and sql[j - 1] == "\n" and (m := _SLASH_LINE.match(sql, j)):
+                end, nxt = j, m.end()
+                break
+            if sql[j] == ";" and not plsql:
+                end, nxt = j, j + 1
+                break
+            j += 1
+        stmt = sql[start:end].strip()
+        if stmt and stmt != "/":
+            out.append(stmt)
+        i = nxt
+
+
 def q(name):
     """Pone comillas al identificador solo si hace falta."""
     return name if re.fullmatch(r"[A-Z][A-Z0-9_$#]*", name) else f'"{name}"'
@@ -171,9 +247,65 @@ def sqlplus_to_sql(sql: str):
     return serveroutput, sql.strip()
 
 
+_SERVEROUTPUT_LINE = re.compile(r"^[ \t]*SET\s+SERVEROUT(?:PUT)?\s+(ON|OFF)\b[^\n]*(?:\n|$)", re.I | re.M)
+
+
+def split_script(sql: str):
+    """Lo que hay que ejecutar de un texto con una o varias sentencias.
+    Devuelve (serveroutput: True/False o None, [sentencias]); acepta SET SERVEROUTPUT y EXEC de SQL*Plus."""
+    serveroutput = None
+    for m in _SERVEROUTPUT_LINE.finditer(sql):
+        serveroutput = m.group(1).upper() == "ON"
+    statements = []
+    for stmt in split_statements(_SERVEROUTPUT_LINE.sub("", sql)):
+        stmt = sqlplus_to_sql(stmt)[1]
+        if strip_comments(stmt):
+            statements.append(stmt)
+    return serveroutput, statements
+
+
 def word_at(line: str, col: int) -> str:
     """El identificador que contiene la columna col (0 = primer carácter) o ''."""
     for m in re.finditer(r"[A-Za-z_][\w$#]*", line):
         if m.start() <= col < m.end():
             return m.group()
     return ""
+
+
+_CHANGE_KW = re.compile(r"\b(DELETE|UPDATE)\b", re.I)
+_WHERE_OR_PAREN = re.compile(r"\(|\)|\bWHERE\b", re.I)
+# Palabras que, justo antes de DELETE/UPDATE, indican que no es una sentencia que borre o cambie filas:
+# FOR UPDATE, ON DELETE CASCADE, BEFORE/AFTER … OR UPDATE OF (triggers), INSTEAD OF DELETE…
+_NOT_A_CHANGE_AFTER = {"FOR", "ON", "BEFORE", "AFTER", "OR", "OF", "INSTEAD", "EACH"}
+
+
+def changes_without_where(sql: str):
+    """DELETE y UPDATE que afectan TODAS las filas porque no tienen WHERE propio. Revisa también los que
+    están dentro de bloques PL/SQL (BEGIN … END) y no se deja engañar por un WHERE dentro de un subquery,
+    un comentario o un texto. Devuelve un resumen corto de cada uno (para la confirmación)."""
+    found = []
+    for piece in blank_literals(sql).split(";"):
+        if re.search(r"\bMERGE\b", piece, re.I):
+            continue                                     # MERGE … THEN UPDATE solo toca las filas que cruzan
+        for m in _CHANGE_KW.finditer(piece):
+            before = re.findall(r"[A-Za-z_][\w$#]*", piece[:m.start()])
+            if before and before[-1].upper() in _NOT_A_CHANGE_AFTER:
+                continue
+            if not _has_own_where(piece[m.end():]):
+                found.append(" ".join(piece[m.start():].split())[:80])
+    return found
+
+
+def _has_own_where(rest: str) -> bool:
+    """¿Hay un WHERE al mismo nivel de paréntesis que la sentencia (no dentro de un subquery)?"""
+    depth = 0
+    for tok in _WHERE_OR_PAREN.finditer(rest):
+        if tok.group() == "(":
+            depth += 1
+        elif tok.group() == ")":
+            depth -= 1
+            if depth < 0:
+                return False                             # se cerró el paréntesis que contenía la sentencia
+        elif depth == 0:
+            return True
+    return False

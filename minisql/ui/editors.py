@@ -55,7 +55,7 @@ class SqlEditor(QPlainTextEdit):
             provider.updated.connect(self._on_metadata)
 
     # Orden de pintado: lo de más abajo queda encima (la búsqueda se ve sobre la línea del depurador)
-    LAYER_ORDER = ("exec", "find", "find_current")
+    LAYER_ORDER = ("run", "exec", "find", "find_current")
 
     def set_highlights(self, layer, selections):
         """Resaltados de una capa (línea del depurador, resultados de búsqueda…); cada capa reemplaza

@@ -46,6 +46,7 @@ RESULT_THEME = {
         "base": "#1e1e1e", "alt": "#272a2f", "grid": "#363636",
         "selection": "#264f78", "selection_fg": "#ffffff",
         "number": "#9cdcfe", "date": "#e5c07b", "null": "#7f7f7f", "binary": "#c586c0",
+        "modified": "#5c4a12", "new": "#1e4a2c", "deleted": "#5a1f1f",     # edición de la grilla
     },
     "light": {
         "header_bg": "#e7eef7", "header_fg": "#1b2a3a", "header_line": "#3b7dd8", "header_sep": "#cbd6e3",
@@ -53,6 +54,7 @@ RESULT_THEME = {
         "base": "#ffffff", "alt": "#f5f8fc", "grid": "#e1e4e8",
         "selection": "#cce4ff", "selection_fg": "#000000",
         "number": "#0451a5", "date": "#8a5a00", "null": "#9a9a9a", "binary": "#a626a4",
+        "modified": "#fff1b8", "new": "#d9f7e3", "deleted": "#fbd5d5",     # edición de la grilla
     },
 }
 

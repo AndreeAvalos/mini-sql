@@ -42,6 +42,7 @@ class FakeVar:
 
 class FakeCursor:
     executed = []                       # todas las sentencias (para revisar compilaciones)
+    inserted = 0                        # filas insertadas por la grilla (para inventar su ROWID)
     errors = []                         # lo que devuelve ALL_ERRORS para PKG
 
     buffer = []                         # simula el búfer de DBMS_OUTPUT de la sesión
@@ -84,8 +85,20 @@ class FakeCursor:
             kwargs["sid"].value = "SID-1"
             self.debugging = True
         self.description = [("A",), ("B",)] if self.sql.lstrip().startswith("select") else None
+        if "minisql$rowid" in self.sql:          # la consulta con el ROWID de cada fila (grilla editable)
+            self.description = [("MINISQL$ROWID",), ("A",), ("B",)]
+        verb = self.sql.lstrip().split(" ", 1)[0]
+        if verb in ("update", "delete"):         # la grilla guarda por ROWID: "GONE" simula una fila que ya no está
+            self.rowcount = 0 if kwargs.get("rid") == "GONE" else 1
+        if verb == "insert" and "returning" in self.sql:
+            FakeCursor.inserted += 1
+            kwargs["rid"].value = f"NEW{FakeCursor.inserted}"
+        if "fail_on_save" in str(kwargs.values()).lower():
+            raise RuntimeError("ORA-00001: restricción única violada")
 
     def fetchmany(self, n):
+        if "minisql$rowid" in self.sql:
+            return [("ROW1", 1, "x"), ("ROW2", 2, None)]
         return [(1, "x"), (2, None)]
 
     def fetchone(self):
@@ -98,6 +111,9 @@ class FakeCursor:
     def fetchall(self):
         q = self.sql
         n = self.kw.get("n") or self.kw.get("nam")
+        if "from all_tab_cols" in q:             # definición de columnas para la grilla editable
+            return [("A", "NUMBER", 22, 10, 2, 0, None, "N", "NO", "NO", None),
+                    ("B", "VARCHAR2", 5, None, None, 5, "C", "Y", "NO", "NO", None)]
         if q.lstrip().startswith("select object_type from all_objects"):
             kinds = {"EMP": "TABLE", "DEPT": "TABLE", "S_EMP": "SYNONYM", "PKG": "PACKAGE", "SEQ": "SEQUENCE"}
             return [(kinds[n],)] if n in kinds and self.kw["own"] == "SCOTT" else []

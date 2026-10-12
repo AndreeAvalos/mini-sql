@@ -8,6 +8,7 @@ from ..sql.text import q
 from .code_page import CodePage
 from .editors import CodeEditor
 from .find_bar import with_find_bar
+from .result_panel import ResultPanel
 from .results import ResultView
 from .style import StatusLabel
 from .workers import Emitter
@@ -39,6 +40,8 @@ class ObjectViewer(QWidget):
         self.key = (owner, name, otype)
         self.running = False                 # la pestaña Datos está consultando en la sesión principal
         self.full = f"{q(owner)}.{q(name)}"
+        self.data_sql = f"SELECT * FROM {self.full}"
+        self.data_panel = None
 
         title = QLabel(f"{kind_label(otype).capitalize()}  <b>{owner}.{name}</b>")
         self.status = StatusLabel()
@@ -67,6 +70,10 @@ class ObjectViewer(QWidget):
                 page = CodeEditor()
                 page.setReadOnly(True)
                 self.tabs.addTab(with_find_bar(page), label)   # Ctrl+F para buscar en el DDL
+            elif label == "Datos":                       # datos de la tabla: filtrar y editar
+                self.data_panel = ResultPanel(conn_tab)
+                page = self.data_panel.view
+                self.tabs.addTab(self.data_panel, label)
             else:
                 page = ResultView()
                 self.tabs.addTab(page, label)
@@ -164,11 +171,11 @@ class ObjectViewer(QWidget):
         self.running = True
         self.status.show_message("Cargando datos…" if not self.conn_tab.db.busy
                                  else "Esperando a que termine la consulta en curso…")
-        self.conn_tab.run_statement(f"SELECT * FROM {self.full}", self.emitter)
+        self.conn_tab.run_statement(self.data_sql, self.emitter, with_rowid=True)
 
     def _data_done(self, res):
         self.running = False
-        self.pages["Datos"].show_rows(res["headers"], res["rows"])
+        self.data_panel.show_result(res, self.data_sql)
         more = f" (solo las primeras {MAX_ROWS})" if res["truncated"] else ""
         self.status.show_message(f"{len(res['rows'])} filas{more}  ·  {res['elapsed']:.2f} s")
 

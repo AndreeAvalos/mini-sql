@@ -56,7 +56,7 @@ def test_sheet_shows_dbms_output(app):
     assert sheet.result_tabs.currentWidget() is sheet.output          # el bloque imprimió: se muestra
     # un SELECT vuelve a la pestaña de resultados; la salida anterior se conserva
     run_and_wait(app, sheet, "select 1 from dual")
-    assert sheet.result_tabs.currentWidget() is sheet.table
+    assert sheet.result_tabs.currentWidget() is sheet.results
     assert "hola" in sheet.output.toPlainText() and sheet.result_tabs.tabText(1) == "DBMS_OUTPUT"
     # DBMS_OUTPUT.ENABLE solo una vez por sesión
     assert sum("dbms_output.enable" in x.lower() for x in FakeCursor.executed) == 1

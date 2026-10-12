@@ -1,12 +1,16 @@
-"""Tabla de resultados: encabezado destacado, un color por tipo de dato y ordenar con clic en el encabezado."""
+"""Tabla de resultados: encabezado destacado, un color por tipo de dato, ordenar con clic en el encabezado,
+filtrar y (si la consulta es de una sola tabla) editar."""
 import datetime
 import numbers
+import re
+from decimal import Decimal, InvalidOperation
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTableView
 
 from ..config import MAX_CELL_CHARS
+from ..db.grid import DATE_FORMATS, parse_value
 from .style import RESULT_THEME, result_stylesheet, result_theme
 
 
@@ -25,12 +29,24 @@ def kind_of(value):
     return "text"
 
 
+RAW_SHOWN_BYTES = 64          # un RAW corto (p. ej. VERSIONS_XID, SYS_GUID) se ve completo en hexadecimal
+
+
+def hex_text(value, limit=None):
+    """Binario en hexadecimal como lo muestra Oracle (RAWTOHEX): 0A001F00A2B30000."""
+    data = bytes(value if limit is None else value[:limit])
+    text = data.hex().upper()
+    return text + "…" if limit is not None and len(value) > limit else text
+
+
 def display_text(value):
     """Cómo se ve un valor en la celda."""
     if value is None:
         return "(null)"
     if isinstance(value, (bytes, bytearray)):
-        return f"<{len(value)} bytes>"
+        if len(value) <= RAW_SHOWN_BYTES:
+            return hex_text(value)
+        return f"<{len(value)} bytes> {hex_text(value, 16)}"     # BLOB: tamaño y el inicio
     if isinstance(value, datetime.datetime):
         if value.microsecond:
             return value.isoformat(sep=" ")
@@ -49,11 +65,80 @@ def sort_key(value):
     return (kind, str(value))
 
 
+def edit_text(value):
+    """El valor como se edita en la celda: completo, sin "(null)" (vacío es NULL) y RAW en hexadecimal."""
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).hex().upper()
+    if isinstance(value, datetime.datetime):
+        return display_text(value)
+    return str(value)
+
+
+_OPERATOR = re.compile(r"^(>=|<=|!=|<>|=|>|<)\s*(.*)$")
+
+
+def _as_number(text):
+    try:
+        return Decimal(text.replace(" ", "").replace(",", ".") if text.count(",") == 1 and "." not in text
+                       else text.replace(" ", ""))
+    except InvalidOperation:
+        return None
+
+
+def _as_date(text):
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.datetime.strptime(text.strip(), fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def make_matcher(text):
+    """Convierte lo escrito en el filtro en una función valor -> bool, o None si no hay filtro.
+        texto       contiene (sin distinguir mayúsculas)
+        =x  !=x     igual / distinto
+        >x  <x  >=x  <=x   compara números y fechas (2026-01-31); si no, como texto
+        null  !null        vacío / con valor"""
+    t = (text or "").strip()
+    if not t:
+        return None
+    low = t.lower()
+    if low in ("null", "=null", "is null"):
+        return lambda v: v is None
+    if low in ("!null", "!=null", "<>null", "not null", "is not null"):
+        return lambda v: v is not None
+    m = _OPERATOR.match(t)
+    if not m:
+        return lambda v: v is not None and low in display_text(v).lower()
+    op, operand = m.group(1), m.group(2).strip()
+
+    def compare(v):
+        if v is None:
+            return op in ("!=", "<>")
+        left, right = None, None
+        if kind_of(v) == "number" and _as_number(operand) is not None:
+            left, right = Decimal(str(v)), _as_number(operand)
+        elif isinstance(v, datetime.date) and _as_date(operand) is not None:
+            left = v if isinstance(v, datetime.datetime) else datetime.datetime(v.year, v.month, v.day)
+            right = _as_date(operand)
+        else:
+            left, right = display_text(v).lower(), operand.lower()
+        return {"=": left == right, "!=": left != right, "<>": left != right, ">": left > right,
+                "<": left < right, ">=": left >= right, "<=": left <= right}[op]
+    return compare
+
+
 class ResultModel(QAbstractTableModel):
     def __init__(self, headers=None, rows=None, theme=None):
         super().__init__()
         self.headers = headers or []
-        self.rows = list(rows or [])
+        self.all_rows = list(rows or [])      # todas las filas (en el orden actual)
+        self.rows = list(self.all_rows)       # las que pasan el filtro (lo que se ve)
+        self.matcher = None
+        self.filter_column = None
         self.colors = {k: QColor(v) for k, v in (theme or RESULT_THEME["dark"]).items()}
         self.italic = QFont()
         self.italic.setItalic(True)
@@ -99,11 +184,28 @@ class ResultModel(QAbstractTableModel):
         if not 0 <= column < len(self.headers):
             return
         self.layoutAboutToBeChanged.emit()
-        values = [r for r in self.rows if r[column] is not None]
-        nulls = [r for r in self.rows if r[column] is None]
+        values = [r for r in self.all_rows if r[column] is not None]
+        nulls = [r for r in self.all_rows if r[column] is None]
         values.sort(key=lambda r: sort_key(r[column]), reverse=order == Qt.DescendingOrder)
-        self.rows = values + nulls
+        self.all_rows = values + nulls
+        self.rows = [r for r in self.all_rows if self._visible(r)]
         self.layoutChanged.emit()
+
+    # --- filtro
+    def set_filter(self, text, column=None):
+        """Muestra solo las filas que cumplen el filtro, en todas las columnas o en `column`."""
+        self.beginResetModel()
+        self.matcher = make_matcher(text)
+        self.filter_column = column
+        self.rows = [r for r in self.all_rows if self._visible(r)]
+        self.endResetModel()
+
+    def _visible(self, row):
+        if self.matcher is None:
+            return True
+        if self.filter_column is not None:
+            return self.matcher(row[self.filter_column])
+        return any(self.matcher(v) for v in row)
 
 
 class ResultView(QTableView):
@@ -163,6 +265,213 @@ class ResultView(QTableView):
             vals = []
             for c in cols:
                 v = model.rows[r][c]
-                vals.append("" if v is None else str(v).replace("\t", " ").replace("\n", " "))
+                if v is None:
+                    vals.append("")
+                elif isinstance(v, (bytes, bytearray)):
+                    vals.append(hex_text(v, 1_000_000))            # RAW/BLOB en hexadecimal, para HEXTORAW('…')
+                else:
+                    vals.append(str(v).replace("\t", " ").replace("\n", " "))
             lines.append("\t".join(vals))
         QGuiApplication.clipboard().setText("\n".join(lines))
+
+
+# ---------------------------------------------------------------- edición
+
+class GridRow(list):
+    """Una fila de la grilla editable: sus valores, su ROWID y cómo era al leerla (None si es nueva)."""
+
+    def __init__(self, values, rowid=None, original=None):
+        super().__init__(values)
+        self.rowid = rowid
+        self.original = original          # tupla de valores leídos de Oracle; None = fila nueva
+        self.deleted = False
+
+    @property
+    def new(self):
+        return self.original is None
+
+    def changed_columns(self):
+        if self.new:
+            return {i for i, v in enumerate(self) if v is not None}
+        return {i for i, (now, before) in enumerate(zip(self, self.original, strict=True))
+                if (now is None) != (before is None) or edit_text(now) != edit_text(before)}
+
+
+class EditableResultModel(ResultModel):
+    """Resultados de una sola tabla que se pueden editar. Valida cada valor contra la definición de la
+    columna al escribirlo; los cambios quedan aquí hasta que se guardan (pending_ops) o se cancelan."""
+    changed = Signal()          # cambió algo pendiente de guardar (para habilitar Guardar/Cancelar)
+    rejected = Signal(str)      # un valor no se aceptó: el motivo
+
+    def __init__(self, headers, rows, rowids, theme=None):
+        super().__init__(headers, [GridRow(r, rid, tuple(r)) for r, rid in zip(rows, rowids, strict=True)], theme)
+        self.columns = [None] * len(self.headers)    # ColumnInfo de cada columna editable (None = no)
+        self.strike = QFont()
+        self.strike.setStrikeOut(True)
+        self.edit_colors = {k: self.colors[k] for k in ("modified", "new", "deleted")}
+
+    def set_columns(self, columns):
+        """columns: ColumnInfo (o None si no se puede editar) para cada columna del resultado."""
+        self.columns = list(columns)
+        self.headerDataChanged.emit(Qt.Horizontal, 0, max(0, len(self.headers) - 1))
+
+    @property
+    def editable(self):
+        return any(c is not None and not c.readonly_reason for c in self.columns)
+
+    def _editable_column(self, column):
+        info = self.columns[column] if column < len(self.columns) else None
+        return info if info is not None and not info.readonly_reason else None
+
+    # --- Qt
+    def flags(self, index):
+        flags = super().flags(index)
+        if index.isValid() and self._editable_column(index.column()) and not self.rows[index.row()].deleted:
+            flags |= Qt.ItemIsEditable
+        return flags
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        row = self.rows[index.row()]
+        if role == Qt.EditRole:
+            return edit_text(row[index.column()])
+        if role == Qt.BackgroundRole:
+            if row.deleted:
+                return self.edit_colors["deleted"]
+            if row.new:
+                return self.edit_colors["new"]
+            if index.column() in row.changed_columns():
+                return self.edit_colors["modified"]
+            return None
+        if role == Qt.FontRole and row.deleted:
+            return self.strike
+        return super().data(index, role)
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if orientation == Qt.Horizontal and role == Qt.ToolTipRole and section < len(self.columns):
+            info = self.columns[section]
+            if info is None:
+                return f"{self.headers[section]}\nSolo lectura: no es una columna de la tabla\nClic para ordenar"
+            detail = info.describe() + ("" if info.nullable else " · obligatoria (NOT NULL)")
+            state = f"Solo lectura: {info.readonly_reason}" if info.readonly_reason else "Editable (doble clic o F2)"
+            return f"{self.headers[section]}  ·  {detail}\n{state}\nClic para ordenar"
+        if orientation == Qt.Vertical and role == Qt.DisplayRole and section < len(self.rows):
+            row = self.rows[section]
+            return "+" if row.new else ("✕" if row.deleted else section + 1)
+        return super().headerData(section, orientation, role)
+
+    def setData(self, index, value, role=Qt.EditRole):
+        if role != Qt.EditRole or not index.isValid():
+            return False
+        info = self._editable_column(index.column())
+        row = self.rows[index.row()]
+        if info is None or row.deleted:
+            return False
+        try:
+            parsed = parse_value(value, info)
+        except ValueError as e:
+            self.rejected.emit(str(e))
+            return False
+        row[index.column()] = parsed
+        self._row_changed(index.row())
+        return True
+
+    def _row_changed(self, r):
+        self.dataChanged.emit(self.index(r, 0), self.index(r, len(self.headers) - 1))
+        self.headerDataChanged.emit(Qt.Vertical, r, r)
+        self.changed.emit()
+
+    def _visible(self, row):
+        return row.new or super()._visible(row)     # una fila nueva siempre se ve, aunque haya filtro
+
+    # --- acciones
+    def set_null(self, indexes):
+        for index in indexes:
+            self.setData(index, "", Qt.EditRole)
+
+    def add_row(self, copy_of=None):
+        """Agrega una fila nueva al final (vacía o copia de otra) y devuelve su número visible."""
+        values = [None] * len(self.headers)
+        if copy_of is not None:
+            values = [v if self._editable_column(i) else None for i, v in enumerate(self.rows[copy_of])]
+        self.beginResetModel()
+        row = GridRow(values)
+        self.all_rows.append(row)
+        self.rows.append(row)
+        self.endResetModel()
+        self.changed.emit()
+        return len(self.rows) - 1
+
+    def delete_rows(self, visible_rows):
+        """Marca las filas para borrar (o las desmarca). Una fila nueva se quita sin más."""
+        self.beginResetModel()
+        for r in sorted(set(visible_rows), reverse=True):
+            row = self.rows[r]
+            if row.new:
+                self.all_rows.remove(row)
+                self.rows.remove(row)
+            else:
+                row.deleted = not row.deleted
+        self.endResetModel()
+        self.changed.emit()
+
+    def has_changes(self):
+        return any(r.new or r.deleted or r.changed_columns() for r in self.all_rows)
+
+    def summary(self):
+        changed = sum(1 for r in self.all_rows if not r.new and not r.deleted and r.changed_columns())
+        new = sum(1 for r in self.all_rows if r.new)
+        deleted = sum(1 for r in self.all_rows if r.deleted)
+        return {"modificadas": changed, "nuevas": new, "borradas": deleted}
+
+    def pending_ops(self):
+        """Operaciones para guardar (ver db.grid.apply_changes). Revisa antes lo que Oracle rechazaría
+        seguro (obligatorias vacías en filas nuevas) y lanza ValueError con todos los problemas."""
+        problems, ops = [], []
+        for row in self.all_rows:
+            if row.deleted:
+                if not row.new:
+                    ops.append(("delete", row.rowid))
+                continue
+            if row.new:
+                values = {}
+                for i, info in enumerate(self.columns):
+                    if info is None or info.readonly_reason:
+                        continue
+                    if row[i] is not None:
+                        values[info.name] = row[i]
+                    elif not info.nullable and not info.has_default:
+                        problems.append(f"Fila nueva: falta {info.name} (es obligatoria)")
+                ops.append(("insert", values))
+                continue
+            changed = row.changed_columns()
+            if changed:
+                ops.append(("update", row.rowid, {self.columns[i].name: row[i] for i in sorted(changed)}))
+        if problems:
+            raise ValueError("\n".join(dict.fromkeys(problems)))
+        return ops
+
+    def mark_saved(self, new_rowids):
+        """Después de guardar: lo pendiente pasa a ser el estado leído."""
+        self.beginResetModel()
+        rowids = iter(new_rowids)
+        self.all_rows = [r for r in self.all_rows if not r.deleted]
+        for row in self.all_rows:
+            if row.new:
+                row.rowid = next(rowids, None)
+            row.original = tuple(row)
+        self.rows = [r for r in self.all_rows if self._visible(r)]
+        self.endResetModel()
+        self.changed.emit()
+
+    def revert(self):
+        """Cancelar: descarta todo lo que no se guardó."""
+        self.beginResetModel()
+        self.all_rows = [r for r in self.all_rows if not r.new]
+        for row in self.all_rows:
+            row[:] = list(row.original)
+            row.deleted = False
+        self.rows = [r for r in self.all_rows if self._visible(r)]
+        self.endResetModel()
+        self.changed.emit()

@@ -4,7 +4,7 @@ import re
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QKeySequence, QShortcut, QTextCursor
+from PySide6.QtGui import QColor, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QTabWidget,
+    QTextEdit,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -20,19 +21,20 @@ from PySide6.QtWidgets import (
 
 from ..config import MAX_ROWS
 from ..sql.completion import completion_target, table_refs
+from ..sql.editable import editable_target
 from ..sql.text import (
     DDL,
-    clean_statement,
+    DML,
+    changes_without_where,
     first_keyword,
     format_sql,
-    sqlplus_to_sql,
-    statement_at_cursor,
+    split_script,
     statement_range,
-    strip_comments,
 )
 from .editors import SqlEditor
 from .find_bar import with_find_bar
-from .results import ResultModel, ResultView
+from .result_panel import ResultPanel
+from .results import ResultModel
 from .style import StatusLabel, mono_font
 from .workers import Emitter
 
@@ -67,9 +69,12 @@ class SheetWidget(QWidget):
         self.run_started = 0.0
         self.run_text = ""
 
+        # resultados: filtro, orden y edición (si la consulta es de una sola tabla)
+        self.results = ResultPanel(conn_tab)
+        self.table = self.results.view
         self.model = ResultModel()
-        self.table = ResultView()
         self.table.setModel(self.model)
+        self.last_sql = None
 
         # salida de DBMS_OUTPUT.PUT_LINE: se acumula entre ejecuciones, con la hora de cada una
         self.output_check = QCheckBox("DBMS_OUTPUT")
@@ -85,7 +90,7 @@ class SheetWidget(QWidget):
         clear_out.clicked.connect(self.clear_output)
         self.result_tabs = QTabWidget()
         self.result_tabs.setDocumentMode(True)
-        self.result_tabs.addTab(self.table, "Resultados")
+        self.result_tabs.addTab(self.results, "Resultados")
         self.result_tabs.addTab(self.output, "DBMS_OUTPUT")
         self.result_tabs.setCornerWidget(clear_out, Qt.TopRightCorner)
         self.output_check.toggled.connect(lambda on: self.result_tabs.setTabVisible(1, on))
@@ -203,35 +208,82 @@ class SheetWidget(QWidget):
             return
         cur = self.editor.textCursor()
         if cur.hasSelection():
+            start, end = cur.selectionStart(), cur.selectionEnd()
             sql = cur.selectedText().replace("\u2029", "\n")
         else:
-            sql = statement_at_cursor(self.editor.toPlainText(), cur.position())
-        serveroutput, sql = sqlplus_to_sql(clean_statement(sql))
+            text = self.editor.toPlainText()
+            start, end = statement_range(text, cur.position())
+            sql = text[start:end]
+        serveroutput, statements = split_script(sql)    # una o varias sentencias (';' o '/' las separan)
         if serveroutput is not None:              # SET SERVEROUTPUT ON|OFF: la casilla DBMS_OUTPUT
             self.output_check.setChecked(serveroutput)
-            if not strip_comments(sql):
+            if not statements:
                 self.set_status(f"DBMS_OUTPUT {'activado' if serveroutput else 'desactivado'}")
                 return
-        if not strip_comments(sql):
+        if not statements:
             self.set_status("No hay ninguna sentencia donde está el cursor")
             return
-        if not self.confirm(sql):
+        self.show_running_statement(start, end)      # siempre a la vista lo que se va a ejecutar
+        if self.results.has_unsaved_changes() and QMessageBox.question(
+                self, "Cambios sin guardar",
+                "Hay cambios sin guardar en los resultados. Si ejecutas, se pierden.\n\n¿Descartarlos y ejecutar?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+            return
+        if not self.confirm(statements):
             return
         self.last_output = 0
         self.result_tabs.setTabText(1, "DBMS_OUTPUT")
-        self.set_running(True, "Ejecutando…" if not self.conn_tab.db.busy
+        script = len(statements) > 1
+        running = f"Ejecutando {len(statements)} sentencias…" if script else "Ejecutando…"
+        self.set_running(True, running if not self.conn_tab.db.busy
                          else "Esperando a que termine otra hoja de esta conexión…")
-        self.conn_tab.run_statement(sql, self.emitter)
+        if script:
+            self.last_sql = None                  # resultados de un script: solo lectura
+            self.conn_tab.run_script(statements, self.emitter)
+            return
+        sql = self.last_sql = statements[0]
+        editable, _why = editable_target(sql)
+        self.conn_tab.run_statement(sql, self.emitter, with_rowid=editable is not None)
 
-    def confirm(self, sql):
-        kw = first_keyword(sql)
-        body = strip_comments(sql).upper()
-        if kw in ("UPDATE", "DELETE") and not re.search(r"\bWHERE\b", body):
-            msg = f"Este {kw} no tiene WHERE: afectará todas las filas de la tabla.\n\n¿Ejecutar de todas formas?"
+    RUN_FLASH_MS = 1500
+
+    def show_running_statement(self, start, end):
+        """Resalta un momento la sentencia que se ejecuta y la trae a la vista: así nunca corre algo
+        distinto de lo que se ve (p. ej. con el cursor fuera de pantalla al recuperar la sesión)."""
+        cursor = QTextCursor(self.editor.document())
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.KeepAnchor)
+        sel = QTextEdit.ExtraSelection()
+        sel.format.setBackground(QColor("#1f4f3f" if self.editor.dark else "#d6f5e3"))
+        sel.cursor = cursor
+        self.editor.set_highlights("run", [sel])
+        view = QTextCursor(self.editor.document())
+        view.setPosition(start)
+        if not self.editor.viewport().rect().contains(self.editor.cursorRect(view).topLeft()):
+            keep = self.editor.textCursor()
+            self.editor.setTextCursor(view)           # llevar la sentencia a la vista…
+            self.editor.centerCursor()
+            self.editor.setTextCursor(keep)           # …sin perder la selección ni la posición del cursor
+        QTimer.singleShot(self.RUN_FLASH_MS, lambda: self.editor.set_highlights("run", []))
+
+    def confirm(self, statements):
+        """Pide confirmación si alguna sentencia es peligrosa. statements: lista (o una sola sentencia)."""
+        if isinstance(statements, str):
+            statements = [statements]
+        sql = ";\n".join(statements)
+        kws = [first_keyword(s) for s in statements]
+        kw = next((k for k in kws if k in ("DROP", "TRUNCATE")), next((k for k in kws if k in DDL), kws[0]))
+        dml_before_ddl = any(k in DML for k in kws[:kws.index(kw)]) if kw in DDL else False
+        unguarded = changes_without_where(sql)      # también dentro de BEGIN … END y sin creerle a subqueries
+        if unguarded:
+            listed = "\n".join(f"  • {u}" for u in unguarded[:5]) + ("\n  • …" if len(unguarded) > 5 else "")
+            msg = ("Sin WHERE: esto afectará TODAS las filas de la tabla.\n\n"
+                   f"{listed}\n\n¿Ejecutar de todas formas?")
         elif kw in ("DROP", "TRUNCATE"):
             msg = f"{kw} no se puede deshacer con Rollback.\n\n¿Ejecutar?"
-        elif kw in DDL and self.conn_tab.pending:
-            msg = ("Hay cambios sin confirmar en esta conexión y las sentencias DDL "
+        elif kw in DDL and (self.conn_tab.pending or dml_before_ddl):
+            where = "en esta conexión" if self.conn_tab.pending else "de las sentencias anteriores del script"
+            msg = (f"Hay cambios sin confirmar {where} y las sentencias DDL "
                    "hacen COMMIT automático de ellos.\n\n¿Continuar?")
         else:
             return True
@@ -261,16 +313,18 @@ class SheetWidget(QWidget):
         if "headers" not in res and self.last_output:
             self.result_tabs.setCurrentWidget(self.output)   # un bloque que imprimió: mostrar su salida
         elif "headers" in res:
-            self.result_tabs.setCurrentWidget(self.table)
+            self.result_tabs.setCurrentWidget(self.results)
         if "headers" in res:
-            self.model = self.table.show_rows(res["headers"], res["rows"])
+            self.model = self.results.show_result(res, self.last_sql)
             more = f" (solo las primeras {MAX_ROWS})" if res["truncated"] else ""
-            self.set_status(f"{len(res['rows'])} filas{more}  ·  {res['elapsed']:.2f} s")
+            script = f"{res['message']}  ·  última consulta: " if res.get("script") else ""
+            self.set_status(f"{script}{len(res['rows'])} filas{more}  ·  {res['elapsed']:.2f} s")
         else:
             self.set_status(f"{res['message']}  ·  {res['elapsed']:.2f} s")
 
     def on_error(self, msg):
         self.set_running(False)
+        self.conn_tab.refresh_pending()             # en un script, las sentencias anteriores sí se ejecutaron
         if self.last_output:
             self.result_tabs.setCurrentWidget(self.output)
         self.set_status(msg, error=True)

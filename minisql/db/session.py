@@ -15,11 +15,17 @@ import time
 import oracledb
 
 from ..config import MAX_OUTPUT_LINES, MAX_ROWS
+from ..sql.editable import rowid_query
 from ..sql.text import DDL, DML, first_keyword
+from .grid import apply_changes
 
 
 class SessionBusy(Exception):
     """La sesión principal está ejecutando otra cosa."""
+
+
+class ScriptError(Exception):
+    """Falló una sentencia de un script; el mensaje dice cuál y qué pasó con las anteriores."""
 
 
 def read_dbms_output(cur, limit=MAX_OUTPUT_LINES, chunk=100):
@@ -100,6 +106,75 @@ class OracleSession:
         res["kw"] = kw
         res["elapsed"] = time.perf_counter() - t0
         return res
+
+    def execute_with_rowid(self, sql, on_output=None):
+        """Como execute, pero trae también el ROWID de cada fila (para editar los resultados).
+        Si Oracle no lo permite (p. ej. ORA-01446 en una consulta agregada), ejecuta la consulta tal cual
+        y deja en res["not_editable"] el motivo; los resultados se muestran igual, en solo lectura."""
+        try:
+            res = self.execute(rowid_query(sql), on_output)
+        except oracledb.DatabaseError as e:
+            res = self.execute(sql, on_output)
+            res["not_editable"] = str(e).splitlines()[0]
+            return res
+        res["rowids"] = [row[0] for row in res["rows"]]
+        res["rows"] = [row[1:] for row in res["rows"]]
+        res["headers"] = res["headers"][1:]
+        return res
+
+    def execute_script(self, statements, on_output=None):
+        """Ejecuta varias sentencias en orden en la sesión principal (como un script de SQL*Plus).
+        Se detiene en la primera que falla (ScriptError); las anteriores quedan hechas y, si cambiaron
+        datos, pendientes de Commit. Devuelve el resultado de la última consulta que trajo filas, o un resumen."""
+        t0 = time.perf_counter()
+        total, kws, grid, changed = len(statements), [], None, 0
+        with self.lock:
+            with self.conn.cursor() as cur:
+                self._enable_output(cur)
+                try:
+                    for n, sql in enumerate(statements, 1):
+                        kw = first_keyword(sql)
+                        try:
+                            res = self._run(cur, sql, kw)
+                        except Exception as e:
+                            raise ScriptError(self._script_failure(n, total, sql, e)) from e
+                        kws.append(kw)
+                        if "headers" in res:
+                            grid = res
+                        elif kw in DML:
+                            changed += max(cur.rowcount or 0, 0)
+                finally:
+                    self._deliver_output(cur, on_output)
+            txn = self.transaction_in_progress
+        message = f"{total} sentencias ejecutadas"
+        if changed:
+            message += f" · {changed} filas afectadas"
+        if txn:
+            message += " (pendiente de Commit)"
+        res = dict(grid or {})
+        res.update(message=message, script=total, txn=txn, elapsed=time.perf_counter() - t0,
+                   kw=next((k for k in kws if k in DDL), kws[-1]))
+        return res
+
+    def _script_failure(self, n, total, sql, error):
+        preview = " ".join(sql.split())
+        preview = preview if len(preview) <= 70 else preview[:70] + "…"
+        done = ""
+        if n > 1:
+            done = f"\nLas {n - 1} anteriores sí se ejecutaron"
+            done += " y sus cambios quedan pendientes de Commit." if self.transaction_in_progress else "."
+        return f"Sentencia {n} de {total}: {preview}\n{error}{done}"
+
+    def apply_grid_changes(self, owner, table, ops):
+        """Guarda los cambios de la grilla en la sesión principal (quedan pendientes de Commit)."""
+        if not self.lock.acquire(blocking=False):
+            raise SessionBusy("Hay una consulta en ejecución en esta conexión; espera a que termine.")
+        try:
+            with self.conn.cursor() as cur:
+                rowids = apply_changes(cur, owner, table, ops)
+            return {"rowids": rowids, "txn": self.transaction_in_progress}
+        finally:
+            self.lock.release()
 
     @staticmethod
     def _run(cur, sql, kw):

@@ -18,55 +18,20 @@ corre `MiniSQL.exe --self-test` (`minisql/selftest.py`) y lo publica en Releases
 a la versión de pyproject.toml. Si se agrega una dependencia que se importa en tiempo de ejecución o desde código
 compilado (como `cryptography` en el modo thin de oracledb), declararla en `hiddenimports` del .spec y cubrirla en selftest.
 
-## Estructura
+## Estructura y contexto
 
-Capas de abajo hacia arriba; una capa nunca importa de una superior.
+Capas de abajo hacia arriba; una capa nunca importa de una superior:
+`config.py`, `workspace.py` → `sql/` (texto puro) → `db/` (Oracle, hilos, sin Qt) → `ui/` (Qt).
 
-    minisql/
-      config.py          rutas (~/.minisql), límites (MAX_ROWS…), perfiles y ajustes
-      workspace.py       espacio de trabajo en disco (WorkspaceStore): sesion/indice.json + una carpeta
-                         por conexión y un .sql por hoja; escritura atómica, solo lo que cambió
-      sql/               texto puro, sin Oracle ni Qt (fácil de probar)
-        text.py            comentarios, separar sentencias (líneas en blanco), identificadores, format_sql
-        completion.py      qué se está escribiendo, alias del FROM/JOIN, ranking de sugerencias
-        plsql.py           unidades PL/SQL separadas por '/', líneas unidad ↔ editor, plantilla de depuración
-        search.py          buscar/reemplazar (opciones, regex, QtPositions: índices Python ↔ posiciones UTF-16 de Qt)
-      db/                todo lo que habla con Oracle; corre en hilos, sin Qt
-        session.py         OracleSession: sesión principal + de metadatos, candados, execute, commit/rollback,
-                           cancel, DBMS_OUTPUT (read_dbms_output)
-        catalog.py         consultas al diccionario: explorador, autocompletado, resolve_object (F4), argumentos
-        source.py          fuente/DDL, compile_code, errores de compilación
-        object_tabs.py     cargadores de las pestañas del visor, registrados con @tab_loader("Nombre")
-        tns.py             tnsnames.ora (comentarios, alias múltiples, IFILE)
-        debug.py           DebugSession: llamadas a DBMS_DEBUG
-      ui/                widgets de Qt
-        main_window.py     pestañas de conexiones, atajos globales, recuperación de sesión al abrir
-        connection_tab.py  una conexión: hojas, visores, transacción pendiente, cierre
-        sheet.py           hoja de SQL: ejecutar, formatear, F4, resultados y DBMS_OUTPUT
-        explorer.py        árbol de esquemas > categorías > objetos, con carga perezosa
-        object_viewer.py   pestaña de un objeto (OBJECT_TABS dice qué pestañas tiene cada tipo)
-        code_page.py       pestaña Código: editar, compilar, errores, breakpoints, iniciar depuración
-        editors.py         SqlEditor (colores + autocompletado) y CodeEditor (margen, breakpoints).
-                           Resaltados por capas con set_highlights(capa, ...): exec, find, find_current
-        find_bar.py        FindBar (Ctrl+F/Ctrl+H/F3/Esc); with_find_bar(editor) devuelve el contenedor
-        completion.py      CompletionProvider: caché de metadatos para sugerencias
-        debugger.py        PlsqlDebugger: hilos y cola de órdenes de la depuración
-        debug_panel.py     DebugPanel, DebugStartDialog y DebugController (une depurador e interfaz)
-        session_keeper.py  SessionKeeper: autoguardado cada AUTOSAVE_MS y hojas de conexiones cerradas
-        connect_dialog.py  perfiles, llavero (keyring), tnsnames, reconexión automática al recuperar
-        workers.py         TaskRunner y Emitter: llevar resultados de hilos a la interfaz
-        style.py           fuente monoespaciada, colores de estado, StatusLabel
-        results.py, highlighter.py
-    tests/               support.py (FakeConn, FakeCursor, make_session…), conftest.py y pruebas por tema
+**Para ahorrar contexto no leas el código a ciegas**: abre `docs/contexto/README.md`, elige el documento
+del área (sql, oracle, interfaz, grilla, depuracion, sesiones, pruebas, release, seguridad) y abre solo los
+archivos que vas a cambiar. Si un cambio deja desactualizado un documento de `docs/contexto/`, actualízalo
+en el mismo cambio.
 
-Detalles útiles:
-- Cada conexión usa dos sesiones: la principal (hojas, transacción del usuario, pestaña Datos, código depurado)
-  y otra de metadatos (`ConnectionTab.meta_call(fn(cursor), on_ok, on_err)`). La contraseña solo vive en
-  memoria dentro de `OracleSession.opener` (lo usa el depurador para abrir una tercera sesión).
-- Para agregar una pestaña al visor: un cargador con `@tab_loader` en `db/object_tabs.py` y su nombre en `OBJECT_TABS`.
-- `ConnectionTab.current_sheet()` siempre devuelve una `SheetWidget` (nunca un visor).
-- Las pruebas reemplazan el depurador real con `PlsqlDebugger.session_factory` y el diálogo con
-  `monkeypatch.setattr(main_window, "ConnectDialog", ...)`.
+Agentes del proyecto (`.claude/agents/`), uno por área: `sql-texto`, `oracle-db`, `interfaz-qt`,
+`grilla-resultados`, `depurador-plsql`, `guardian-sesion`, `verificador` (pytest/ruff/capturas, resume solo
+fallos), `release` y `revisor-seguridad` (solo lectura). Delegar en ellos las tareas de su área y la
+verificación mantiene corto el contexto principal.
 
 ## Reglas que hay que mantener
 
@@ -81,5 +46,8 @@ Detalles útiles:
 - Si cambia la interfaz, regenerar las capturas del README (`docs/generar_capturas.py`).
 - Una sola instancia (`app.single_instance_lock`, QLockFile en ~/.minisql/minisql.lock): dos SessionKeeper
   sobre la misma carpeta se pisarían. El ejecutable (.exe) y `python main.py` comparten ~/.minisql.
+- Edición de resultados: siempre por ROWID y con bind variables; nunca hacer COMMIT al guardar (queda para el
+  usuario). Las ediciones de la grilla sin guardar no van al guardián de sesión: se confirma antes de perderlas
+  (ejecutar otra consulta, cerrar la hoja, la conexión o la app).
 - Nunca perder trabajo del usuario: todo estado nuevo que el usuario escriba (hojas, código) debe entrar en
   `ConnectionTab.snapshot()` / `restore()` para que el guardián de sesión lo recupere.

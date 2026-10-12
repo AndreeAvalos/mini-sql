@@ -19,7 +19,9 @@ from PySide6.QtWidgets import QApplication
 
 app = QApplication(sys.argv)
 
+from minisql.db.grid import preview_sql
 from minisql.ui.main_window import MainWindow
+from minisql.ui.save_preview import SavePreviewDialog
 
 import support
 from support import FakeConn, FakeCursor, FakeDebugSession, make_session, pump, wait_until
@@ -55,12 +57,24 @@ class DemoCursor(FakeCursor):
         super().execute(sql, *args, **kwargs)
         if "from clientes" in self.sql:
             self.description = [("ID",), ("NOMBRE",), ("CIUDAD",), ("SALDO",), ("FECHA_ALTA",)]
+            if "minisql$rowid" in self.sql:                  # la grilla editable pide también el ROWID
+                self.description = [("MINISQL$ROWID",), *self.description]
 
     def fetchmany(self, n):
-        return CLIENTES if "from clientes" in self.sql else super().fetchmany(n)
+        if "from clientes" not in self.sql:
+            return super().fetchmany(n)
+        if "minisql$rowid" in self.sql:
+            return [(f"AAAR{i:04d}", *row) for i, row in enumerate(CLIENTES)]
+        return CLIENTES
 
     def fetchall(self):
         q = self.sql
+        if "from all_tab_cols" in q:             # definición de CLIENTES para la grilla editable
+            return [("ID", "NUMBER", 22, 10, 0, 0, None, "N", "NO", "NO", None),
+                    ("NOMBRE", "VARCHAR2", 120, None, None, 120, "C", "N", "NO", "NO", None),
+                    ("CIUDAD", "VARCHAR2", 60, None, None, 60, "C", "Y", "NO", "NO", None),
+                    ("SALDO", "NUMBER", 22, 14, 2, 0, None, "Y", "NO", "NO", "0"),
+                    ("FECHA_ALTA", "DATE", 7, None, None, 0, None, "Y", "NO", "NO", "SYSDATE")]
         n = self.kw.get("n") or self.kw.get("nam") or self.kw.get("tab")
         if "all_users" in q:
             return [("VENTAS",), ("CONTABILIDAD",), ("INVENTARIO",)]
@@ -124,8 +138,31 @@ def main():
     sheet.editor.setPlainText(QUERY)
     sheet.run()
     wait_until(app, lambda: not sheet.running)
+    wait_until(app, lambda: sheet.results.target is not None)
+    wait_until(app, lambda: not sheet.editor.highlight_layers.get("run"), 3)   # sin el resaltado de "ejecutado"
     pump(app, 10)
     save(w, "hoja.png")
+
+    # 1b. Edición de resultados: una celda cambiada, una fila nueva y otra marcada para borrar
+    model = sheet.results.model
+    model.setData(model.index(1, 3), "45000")
+    model.delete_rows([6])
+    new = model.add_row()
+    for col, value in enumerate(("4105", "Tienda La Esquina", "Huehuetenango", "1500", "2026-10-12")):
+        model.setData(model.index(new, col), value)
+    sheet.results.view.clearSelection()
+    pump(app, 10)
+    save(w, "edicion.png")
+
+    # 1c. Confirmación al guardar: las sentencias que se van a ejecutar
+    owner, table = sheet.results.target
+    dialog = SavePreviewDialog(f"{owner}.{table}", preview_sql(owner, table, model.pending_ops()),
+                               model.summary(), w)
+    dialog.show()
+    pump(app, 10)
+    save(dialog, "guardar.png")
+    dialog.close()
+    sheet.results.cancel()
 
     # 2. Autocompletado con alias
     sheet.editor.setPlainText("SELECT *\nFROM clientes c\nWHERE c.")

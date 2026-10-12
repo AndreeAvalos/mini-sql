@@ -22,7 +22,9 @@ def test_value_kinds_and_display():
     assert kind_of(datetime.date(2024, 1, 1)) == kind_of(datetime.datetime(2024, 1, 1)) == "date"
     assert display_text(datetime.datetime(2024, 1, 5)) == "2024-01-05"                  # DATE sin hora
     assert display_text(datetime.datetime(2023, 7, 9, 14, 30)) == "2023-07-09 14:30:00"
-    assert display_text(None) == "(null)" and display_text(b"abc") == "<3 bytes>"
+    assert display_text(None) == "(null)"
+    assert display_text(bytes.fromhex("0A001F00A2B30000")) == "0A001F00A2B30000"      # RAW (versions_xid)
+    assert display_text(bytes(100)).startswith("<100 bytes> 00000000")                # BLOB: tamaño e inicio
     assert display_text("x" * 500).endswith("…")
 
 
@@ -74,3 +76,11 @@ def test_header_is_styled(app):
     style = view.styleSheet()
     assert "QHeaderView::section:horizontal" in style and "font-weight: bold" in style
     assert view.theme["header_line"] in style
+
+
+def test_copy_raw_as_hex(app):
+    view = ResultView()
+    view.show_rows(["XID", "FECHA"], [(bytes.fromhex("0A001F00A2B30000"), datetime.datetime(2026, 10, 9, 16, 37, 56))])
+    view.selectRow(0)
+    view.copy_selection()
+    assert QGuiApplication.clipboard().text() == "0A001F00A2B30000\t2026-10-09 16:37:56"   # listo para HEXTORAW('…')

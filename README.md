@@ -15,8 +15,14 @@ explorador de objetos, autocompletado, edición y compilación de paquetes, y de
 
 - **Varias conexiones y hojas en pestañas.** Cada conexión tiene su explorador y sus hojas; todas comparten la
   transacción de la conexión, con Commit/Rollback explícitos (autocommit apagado).
+- **Editar los resultados** de una consulta de una sola tabla: celdas, filas nuevas y borradas, validando cada
+  valor contra la columna (tipo, largo, decimales, NOT NULL). **Guardar** muestra antes las sentencias que se
+  van a ejecutar, aplica los cambios por ROWID y quedan pendientes de Commit; **Cancelar** los descarta.
+- **Filtrar y ordenar** los resultados: texto libre, `=valor`, `>100`, `<=2026-01-31`, `null`, `!null`.
 - **Ejecución sin congelar la ventana**, con cancelación, tiempo transcurrido y hasta 1000 filas por consulta.
-  Ctrl+Enter ejecuta la sentencia donde está el cursor (se separan con una línea en blanco).
+  Ctrl+Enter ejecuta la sentencia donde está el cursor (se separan con una línea en blanco). Si ese bloque o la
+  selección tiene varias sentencias terminadas en `;` (o bloques PL/SQL terminados en `/`), se ejecutan en orden
+  como un script y se detiene en la primera que falla.
 - **Confirmaciones de seguridad** antes de `UPDATE`/`DELETE` sin `WHERE`, `DROP`, `TRUNCATE` y DDL con cambios
   pendientes.
 - **Autocompletado** de palabras clave, funciones, esquemas, tablas, columnas, paquetes y secuencias. Entiende los
@@ -31,6 +37,10 @@ explorador de objetos, autocompletado, edición y compilación de paquetes, y de
   cada variable al pasar el mouse.
 - **Nunca se pierde trabajo:** las hojas se guardan solas cada pocos segundos y se recuperan al volver a abrir,
   incluso después de un cierre inesperado.
+
+![Edición de resultados: celda cambiada, fila nueva y fila a borrar](docs/img/edicion.png)
+
+![Antes de guardar: las sentencias que se van a ejecutar](docs/img/guardar.png)
 
 | Autocompletado con alias | Visor de objetos |
 |---|---|
@@ -79,6 +89,8 @@ el llavero del sistema (Administrador de credenciales de Windows, Keychain de ma
 | Ctrl+Espacio | Autocompletar |
 | Ctrl+Shift+F | Formatear la sentencia del cursor |
 | Ctrl+F / Ctrl+H | Buscar / reemplazar (mayúsculas, palabra completa, expresión regular) |
+| Doble clic / F2 en una celda | Editar el valor (vacío = NULL) |
+| Ctrl+S en los resultados | Guardar los cambios de la grilla (quedan pendientes de Commit) |
 | F3 / Shift+F3 | Siguiente / anterior resultado de la búsqueda |
 | F4 | Abrir el objeto cuyo nombre está bajo el cursor |
 | Ctrl+T / Ctrl+W | Nueva hoja / cerrar hoja |

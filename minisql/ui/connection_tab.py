@@ -4,7 +4,7 @@ import threading
 import time
 
 import oracledb
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -150,6 +150,10 @@ class ConnectionTab(QWidget):
                     "Cerrar", f"{sheet.name} tiene cambios sin compilar. ¿Cerrar de todas formas?"):
                 return
             sheet.forget_breakpoints()
+        elif sheet.results.has_unsaved_changes() and not self._confirm(
+                "Cerrar hoja", f"{self.sheets.tabText(i)} tiene cambios sin guardar en los resultados. "
+                "¿Cerrar y descartarlos?"):
+            return
         elif sheet.editor.document().isModified() and sheet.editor.toPlainText().strip():
             if not self._confirm("Cerrar hoja", f"¿Cerrar {self.sheets.tabText(i)}? Se perderá el SQL que contiene."):
                 return
@@ -202,11 +206,21 @@ class ConnectionTab(QWidget):
         """Ejecuta fn(cursor) en la sesión de metadatos, en un hilo; el resultado vuelve a la interfaz."""
         self.runner.run(lambda: self.db.with_meta_cursor(fn), on_ok, on_err)
 
-    def run_statement(self, sql, emitter):
-        """Ejecuta sql en la sesión principal, en un hilo. Avisa por emitter: output, done o failed."""
+    def run_statement(self, sql, emitter, with_rowid=False):
+        """Ejecuta sql en la sesión principal, en un hilo. Avisa por emitter: output, done o failed.
+        with_rowid: trae también el ROWID de cada fila, para poder editar los resultados."""
+        run = self.db.execute_with_rowid if with_rowid else self.db.execute
+        self._run_in_thread(lambda: run(sql, emitter.output.emit), emitter)
+
+    def run_script(self, statements, emitter):
+        """Ejecuta varias sentencias en orden en la sesión principal, en un hilo (ver OracleSession.execute_script)."""
+        self._run_in_thread(lambda: self.db.execute_script(statements, emitter.output.emit), emitter)
+
+    @staticmethod
+    def _run_in_thread(fn, emitter):
         def work():
             try:
-                res = self.db.execute(sql, emitter.output.emit)
+                res = fn()
             except Exception as e:
                 emitter.failed.emit(str(e))
             else:
@@ -227,6 +241,11 @@ class ConnectionTab(QWidget):
             self.set_pending(True)
         elif kw in DDL or kw in ("COMMIT", "ROLLBACK"):
             self.set_pending(False)
+
+    def refresh_pending(self):
+        """Después de un error: las sentencias anteriores de un script pudieron dejar cambios sin confirmar."""
+        if self.db.transaction_in_progress:
+            self.set_pending(True)
 
     def set_pending(self, value):
         self.pending = value
@@ -297,6 +316,7 @@ class ConnectionTab(QWidget):
         cur = sheet.editor.textCursor()
         cur.setPosition(min(t.get("cursor", 0), len(text)))
         sheet.editor.setTextCursor(cur)
+        QTimer.singleShot(0, sheet.editor.ensureCursorVisible)   # el cursor recuperado, siempre a la vista
         m = re.fullmatch(r"Hoja(\d+)", t.get("title") or "")
         if m:
             self.sheet_counter = max(self.sheet_counter, int(m.group(1)))
@@ -333,6 +353,12 @@ class ConnectionTab(QWidget):
     def close_connection(self):
         """Devuelve True si se pudo cerrar. Si hay algo corriendo, ofrece cancelarlo; si hay cambios
         sin confirmar, pregunta Commit o Rollback."""
+        unsaved = [self.sheets.tabText(i) for i in range(self.sheets.count())
+                   if hasattr(self.sheets.widget(i), "results") and self.sheets.widget(i).results.has_unsaved_changes()]
+        if unsaved and not self._confirm(
+                "Cambios sin guardar", f"{self.name}: hay cambios sin guardar en los resultados de "
+                f"{', '.join(unsaved)}. ¿Cerrar y descartarlos?"):
+            return False
         if self.debugger.active or self.db.busy:
             closed = self._cancel_running_work()
             if closed is not None:

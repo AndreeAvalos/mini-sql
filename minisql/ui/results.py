@@ -132,13 +132,16 @@ def make_matcher(text):
 
 
 class ResultModel(QAbstractTableModel):
-    def __init__(self, headers=None, rows=None, theme=None):
+    def __init__(self, headers=None, rows=None, theme=None, page_size=None):
+        """page_size: filas por página (None = todas en una; así lo usan las tablas chicas del visor)."""
         super().__init__()
         self.headers = headers or []
-        self.all_rows = list(rows or [])      # todas las filas (en el orden actual)
-        self.rows = list(self.all_rows)       # las que pasan el filtro (lo que se ve)
+        self.all_rows = list(self._wrap(rows or []))   # todas las filas cargadas (en el orden actual)
         self.matcher = None
         self.filter_column = None
+        self.page_size = page_size
+        self.page = 0
+        self._refresh()
         self.colors = {k: QColor(v) for k, v in (theme or RESULT_THEME["dark"]).items()}
         self.italic = QFont()
         self.italic.setItalic(True)
@@ -174,7 +177,7 @@ class ResultModel(QAbstractTableModel):
                 return f"{self.headers[section]}\nClic para ordenar"
             return None
         if role == Qt.DisplayRole:
-            return section + 1
+            return self.first_number + section
         if role == Qt.TextAlignmentRole:
             return Qt.AlignRight | Qt.AlignVCenter
         return None
@@ -188,7 +191,7 @@ class ResultModel(QAbstractTableModel):
         nulls = [r for r in self.all_rows if r[column] is None]
         values.sort(key=lambda r: sort_key(r[column]), reverse=order == Qt.DescendingOrder)
         self.all_rows = values + nulls
-        self.rows = [r for r in self.all_rows if self._visible(r)]
+        self._refresh(page=0)
         self.layoutChanged.emit()
 
     # --- filtro
@@ -197,8 +200,48 @@ class ResultModel(QAbstractTableModel):
         self.beginResetModel()
         self.matcher = make_matcher(text)
         self.filter_column = column
-        self.rows = [r for r in self.all_rows if self._visible(r)]
+        self._refresh(page=0)
         self.endResetModel()
+
+    # --- páginas (sobre las filas cargadas que pasan el filtro)
+    def _refresh(self, page=None):
+        """Recalcula lo que se ve: filas que pasan el filtro (filtered) y las de la página actual (rows)."""
+        self.filtered = [r for r in self.all_rows if self._visible(r)]
+        if page is not None:
+            self.page = page
+        self.page = max(0, min(self.page, self.page_count() - 1))
+        if self.page_size:
+            start = self.page * self.page_size
+            self.rows = self.filtered[start:start + self.page_size]
+        else:
+            self.rows = list(self.filtered)
+
+    def page_count(self):
+        if not self.page_size:
+            return 1
+        return max(1, -(-len(self.filtered) // self.page_size))
+
+    @property
+    def first_number(self):
+        """Número (desde 1) de la primera fila de la página."""
+        return 1 + self.page * (self.page_size or 0)
+
+    def set_page(self, page):
+        self.beginResetModel()
+        self._refresh(page)
+        self.endResetModel()
+
+    def append_rows(self, rows, rowids=None):
+        """Agrega filas traídas de Oracle (página siguiente) antes de las filas nuevas sin guardar."""
+        self.beginResetModel()
+        at = next((i for i, r in enumerate(self.all_rows) if getattr(r, "new", False)), len(self.all_rows))
+        self.all_rows[at:at] = self._wrap(rows, rowids)
+        self._refresh()
+        self.endResetModel()
+
+    @staticmethod
+    def _wrap(rows, rowids=None):
+        return list(rows)
 
     def _visible(self, row):
         if self.matcher is None:
@@ -303,12 +346,18 @@ class EditableResultModel(ResultModel):
     changed = Signal()          # cambió algo pendiente de guardar (para habilitar Guardar/Cancelar)
     rejected = Signal(str)      # un valor no se aceptó: el motivo
 
-    def __init__(self, headers, rows, rowids, theme=None):
-        super().__init__(headers, [GridRow(r, rid, tuple(r)) for r, rid in zip(rows, rowids, strict=True)], theme)
+    def __init__(self, headers, rows, rowids, theme=None, page_size=None):
+        self._first_rowids = rowids
+        super().__init__(headers, rows, theme, page_size)
         self.columns = [None] * len(self.headers)    # ColumnInfo de cada columna editable (None = no)
         self.strike = QFont()
         self.strike.setStrikeOut(True)
         self.edit_colors = {k: self.colors[k] for k in ("modified", "new", "deleted")}
+
+    def _wrap(self, rows, rowids=None):
+        if rowids is None:
+            rowids, self._first_rowids = self._first_rowids, None
+        return [GridRow(r, rid, tuple(r)) for r, rid in zip(rows, rowids, strict=True)]
 
     def set_columns(self, columns):
         """columns: ColumnInfo (o None si no se puede editar) para cada columna del resultado."""
@@ -358,7 +407,7 @@ class EditableResultModel(ResultModel):
             return f"{self.headers[section]}  ·  {detail}\n{state}\nClic para ordenar"
         if orientation == Qt.Vertical and role == Qt.DisplayRole and section < len(self.rows):
             row = self.rows[section]
-            return "+" if row.new else ("✕" if row.deleted else section + 1)
+            return "+" if row.new else ("✕" if row.deleted else self.first_number + section)
         return super().headerData(section, orientation, role)
 
     def setData(self, index, value, role=Qt.EditRole):
@@ -398,10 +447,10 @@ class EditableResultModel(ResultModel):
         self.beginResetModel()
         row = GridRow(values)
         self.all_rows.append(row)
-        self.rows.append(row)
+        self._refresh(page=len(self.all_rows))          # a la última página, donde quedó la fila
         self.endResetModel()
         self.changed.emit()
-        return len(self.rows) - 1
+        return next(i for i, r in enumerate(self.rows) if r is row)    # por identidad: filas iguales
 
     def delete_rows(self, visible_rows):
         """Marca las filas para borrar (o las desmarca). Una fila nueva se quita sin más."""
@@ -409,10 +458,10 @@ class EditableResultModel(ResultModel):
         for r in sorted(set(visible_rows), reverse=True):
             row = self.rows[r]
             if row.new:
-                self.all_rows.remove(row)
-                self.rows.remove(row)
+                self.all_rows = [r for r in self.all_rows if r is not row]   # por identidad, no por valor
             else:
                 row.deleted = not row.deleted
+        self._refresh()
         self.endResetModel()
         self.changed.emit()
 
@@ -461,7 +510,7 @@ class EditableResultModel(ResultModel):
             if row.new:
                 row.rowid = next(rowids, None)
             row.original = tuple(row)
-        self.rows = [r for r in self.all_rows if self._visible(r)]
+        self._refresh()
         self.endResetModel()
         self.changed.emit()
 
@@ -472,6 +521,6 @@ class EditableResultModel(ResultModel):
         for row in self.all_rows:
             row[:] = list(row.original)
             row.deleted = False
-        self.rows = [r for r in self.all_rows if self._visible(r)]
+        self._refresh()
         self.endResetModel()
         self.changed.emit()

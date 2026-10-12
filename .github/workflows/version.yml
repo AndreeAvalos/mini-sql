@@ -1,0 +1,62 @@
+name: Versión automática ([CI])
+
+# Un push a main con un commit que diga [CI], [CI minor] o [CI major] publica una versión nueva:
+#   1. packaging/bump_version.py decide el número (si el de minisql/__init__.py nunca se publicó, ese mismo).
+#   2. Si cambió, el bot hace el commit "Versión X.Y.Z" en main (después de esto hay que hacer git pull).
+#   3. Llama a release.yml: pruebas, .exe, autoprueba, SHA-256 y Release con la etiqueta vX.Y.Z.
+# La etiqueta la crea el Release al final: si algo falla, no queda una versión a medias y el siguiente [CI]
+# vuelve a intentar el mismo número. Los commits del bot no disparan workflows (no hay ciclos).
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version
+  cancel-in-progress: false            # dos [CI] seguidos: uno detrás del otro, nunca a la vez
+
+jobs:
+  bump:
+    if: contains(join(github.event.commits.*.message, ' '), '[CI')    # contains() no distingue mayúsculas
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.version.outputs.publish }}
+      tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0                 # para ver todas las etiquetas
+
+      - name: Decidir la versión
+        id: version
+        env:
+          MESSAGES: ${{ join(github.event.commits.*.message, ' ') }}
+        run: |
+          export TAGS="$(git tag -l 'v*' | tr '\n' ' ')"
+          python3 packaging/bump_version.py
+
+      - name: Commit de la versión
+        id: commit
+        if: steps.version.outputs.publish == 'true'
+        run: |
+          if [ "${{ steps.version.outputs.changed }}" = "true" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "Versión ${{ steps.version.outputs.version }}"
+            git push origin HEAD:main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: bump
+    if: needs.bump.outputs.publish == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.bump.outputs.tag }}
+      ref: ${{ needs.bump.outputs.sha }}
+    permissions:
+      contents: write

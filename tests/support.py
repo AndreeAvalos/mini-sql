@@ -46,6 +46,8 @@ class FakeCursor:
     errors = []                         # lo que devuelve ALL_ERRORS para PKG
 
     buffer = []                         # simula el búfer de DBMS_OUTPUT de la sesión
+    big_rows = 450                      # filas de BIG_TABLE (para probar la paginación)
+    closed = 0                          # cursores cerrados
 
     def var(self, *_a, **_k):
         return FakeVar()
@@ -71,8 +73,12 @@ class FakeCursor:
     def __exit__(self, *a):
         pass
 
+    def close(self):
+        FakeCursor.closed += 1
+
     def execute(self, sql, *args, **kwargs):
         self.sql, self.kw = sql.lower(), kwargs
+        self.pos = 0                             # filas ya entregadas de BIG_TABLE
         FakeCursor.executed.append(sql)
         if getattr(self, "debugging", False) and "dbms_debug.initialize" not in self.sql:
             # como en Oracle: el bloque depurado no termina hasta que el depurador lo deja terminar
@@ -97,6 +103,11 @@ class FakeCursor:
             raise RuntimeError("ORA-00001: restricción única violada")
 
     def fetchmany(self, n):
+        if "big_table" in self.sql:              # tabla grande: entrega las filas de a poco, como Oracle
+            end = min(self.pos + n, FakeCursor.big_rows)
+            rows = [(i, f"f{i}") for i in range(self.pos + 1, end + 1)]
+            self.pos = end
+            return [(f"R{r[0]}", *r) for r in rows] if "minisql$rowid" in self.sql else rows
         if "minisql$rowid" in self.sql:
             return [("ROW1", 1, "x"), ("ROW2", 2, None)]
         return [(1, "x"), (2, None)]
@@ -115,7 +126,8 @@ class FakeCursor:
             return [("A", "NUMBER", 22, 10, 2, 0, None, "N", "NO", "NO", None),
                     ("B", "VARCHAR2", 5, None, None, 5, "C", "Y", "NO", "NO", None)]
         if q.lstrip().startswith("select object_type from all_objects"):
-            kinds = {"EMP": "TABLE", "DEPT": "TABLE", "S_EMP": "SYNONYM", "PKG": "PACKAGE", "SEQ": "SEQUENCE"}
+            kinds = {"EMP": "TABLE", "DEPT": "TABLE", "BIG_TABLE": "TABLE", "S_EMP": "SYNONYM", "PKG": "PACKAGE",
+                     "SEQ": "SEQUENCE"}
             return [(kinds[n],)] if n in kinds and self.kw["own"] == "SCOTT" else []
         if q.lstrip().startswith("select cc.column_name from all_cons_columns"):
             return [("ID",)]

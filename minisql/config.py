@@ -25,7 +25,8 @@ AUTOSAVE_MS = 3000
 KEYRING_SERVICE = "minisql-oracle"
 
 
-MAX_ROWS = 1000          # filas máximas que se traen por consulta
+PAGE_ROWS = 200          # filas por página: se traen de Oracle de a una página, cuando se piden
+MAX_ROWS = 100_000       # tope de filas cargadas en memoria por resultado ("Traer todas")
 
 
 MAX_CELL_CHARS = 300     # texto visible por celda (al copiar se copia completo)

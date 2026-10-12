@@ -27,6 +27,19 @@ Pruebas: `tests/test_grid.py`, `test_results.py`. Captura: `docs/img/edicion.png
 - `preview_sql(owner, table, ops)` / `sql_literal(v)`: las mismas sentencias con los valores como literales,
   **solo para mostrar** (la ejecución sigue con binds). Pruebas: monkeypatch de `panel.confirm_save`.
 
+## Paginación
+- `OracleSession.execute` trae solo `PAGE_ROWS` (200, config.py). Si llenó la página, `res["more"]` y
+  `res["stream"]` = `RowStream` (db/session.py): el cursor queda abierto; `fetch(n)` / `fetch_all(limit)` toman el
+  candado de la sesión; se cierra solo al llegar al final. DBMS_OUTPUT se lee con otro cursor.
+- `ResultModel(page_size=…)`: `all_rows` (cargadas) → `filtered` (filtro) → `rows` (página). `set_page`,
+  `page_count`, `first_number` (numeración global), `append_rows` (antes de las filas nuevas). Sin `page_size`
+  (tablas del visor) no hay páginas.
+- `ResultPanel`: ◀ ▶ (▶ trae de Oracle si hace falta), «⏬ Todas» (hasta `MAX_ROWS` = 100.000), contador
+  "201-400 · 400+ filas". `_close_stream()` al mostrar otro resultado y `dispose()` al cerrar la hoja o el visor.
+  Los scripts muestran solo la primera página (sin cursor abierto).
+- Tras Guardar, `ConnectionTab.transaction_ended("Commit"|"Rollback")` cambia el aviso "pendiente de Commit".
+- Pruebas: `tests/test_paging.py` (BIG_TABLE de 450 filas en FakeCursor).
+
 ## Filtro y orden (ui/results.py)
 - `ResultModel.all_rows` (todas) y `rows` (visibles). `set_filter(texto, columna)` con `make_matcher`:
   texto (contiene), `=v`, `!=v`, `>`, `<`, `>=`, `<=` (números y fechas), `null`, `!null`.

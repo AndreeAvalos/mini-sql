@@ -14,7 +14,7 @@ import time
 
 import oracledb
 
-from ..config import MAX_OUTPUT_LINES, MAX_ROWS
+from ..config import MAX_OUTPUT_LINES, PAGE_ROWS
 from ..sql.editable import rowid_query
 from ..sql.text import DDL, DML, first_keyword
 from .grid import apply_changes
@@ -26,6 +26,50 @@ class SessionBusy(Exception):
 
 class ScriptError(Exception):
     """Falló una sentencia de un script; el mensaje dice cuál y qué pasó con las anteriores."""
+
+
+class RowStream:
+    """Cursor abierto de una consulta, para traer más filas cuando se piden (paginación de resultados).
+    Cada pedido toma el candado de la sesión principal: Oracle permite tener el cursor abierto mientras
+    se ejecutan otras sentencias, pero no dos llamadas a la vez. Se cierra solo al llegar al final."""
+
+    def __init__(self, session, cursor):
+        self.session = session
+        self.cursor = cursor
+        self.with_rowid = False        # la primera columna es el ROWID (grilla editable)
+        self.done = False
+
+    def fetch(self, n):
+        """Hasta n filas más: (filas, rowids o None)."""
+        if self.done:
+            return [], ([] if self.with_rowid else None)
+        with self.session.lock:
+            rows = self.cursor.fetchmany(n)
+            if len(rows) < n:
+                self._close_locked()
+        if not self.with_rowid:
+            return rows, None
+        return [r[1:] for r in rows], [r[0] for r in rows]
+
+    def fetch_all(self, limit):
+        """Lo que queda, hasta limit filas."""
+        rows, rowids = [], [] if self.with_rowid else None
+        while not self.done and len(rows) < limit:
+            more, ids = self.fetch(min(PAGE_ROWS * 10, limit - len(rows)))
+            rows += more
+            if rowids is not None:
+                rowids += ids
+        return rows, rowids
+
+    def close(self):
+        if not self.done:
+            with self.session.lock:
+                self._close_locked()
+
+    def _close_locked(self):
+        self.done = True
+        with contextlib.suppress(Exception):
+            self.cursor.close()
 
 
 def read_dbms_output(cur, limit=MAX_OUTPUT_LINES, chunk=100):
@@ -91,17 +135,25 @@ class OracleSession:
     # --- sesión principal
     def execute(self, sql, on_output=None):
         """Ejecuta una sentencia en la sesión principal y devuelve un dict con el resultado:
-        headers/rows/truncated si es una consulta, o message. Llama on_output(líneas) con lo que
-        imprimió DBMS_OUTPUT, también si la sentencia falla (el error se propaga después)."""
+        headers/rows/more si es una consulta (la primera página), o message. Si quedan filas, res["stream"]
+        es un RowStream para traer las siguientes páginas. Llama on_output(líneas) con lo que imprimió
+        DBMS_OUTPUT, también si la sentencia falla (el error se propaga después)."""
         kw = first_keyword(sql)
         t0 = time.perf_counter()
         with self.lock:
-            with self.conn.cursor() as cur:
+            cur, keep_open = self.conn.cursor(), False
+            try:
                 self._enable_output(cur)
                 try:
                     res = self._run(cur, sql, kw)
                 finally:
-                    self._deliver_output(cur, on_output)
+                    self._deliver_output(on_output)
+                if res.get("more"):
+                    res["stream"] = RowStream(self, cur)      # el cursor queda abierto para la página siguiente
+                    keep_open = True
+            finally:
+                if not keep_open:
+                    cur.close()
             res["txn"] = self.transaction_in_progress
         res["kw"] = kw
         res["elapsed"] = time.perf_counter() - t0
@@ -120,6 +172,8 @@ class OracleSession:
         res["rowids"] = [row[0] for row in res["rows"]]
         res["rows"] = [row[1:] for row in res["rows"]]
         res["headers"] = res["headers"][1:]
+        if res.get("stream"):
+            res["stream"].with_rowid = True
         return res
 
     def execute_script(self, statements, on_output=None):
@@ -135,7 +189,7 @@ class OracleSession:
                     for n, sql in enumerate(statements, 1):
                         kw = first_keyword(sql)
                         try:
-                            res = self._run(cur, sql, kw)
+                            res = self._run(cur, sql, kw)      # de una consulta: solo la primera página
                         except Exception as e:
                             raise ScriptError(self._script_failure(n, total, sql, e)) from e
                         kws.append(kw)
@@ -144,7 +198,7 @@ class OracleSession:
                         elif kw in DML:
                             changed += max(cur.rowcount or 0, 0)
                 finally:
-                    self._deliver_output(cur, on_output)
+                    self._deliver_output(on_output)
             txn = self.transaction_in_progress
         message = f"{total} sentencias ejecutadas"
         if changed:
@@ -178,14 +232,14 @@ class OracleSession:
 
     @staticmethod
     def _run(cur, sql, kw):
-        cur.arraysize = 500
+        cur.arraysize = PAGE_ROWS
         cur.execute(sql)
         if cur.description:
-            rows = cur.fetchmany(MAX_ROWS + 1)
+            rows = cur.fetchmany(PAGE_ROWS)
             return {
                 "headers": [d[0] for d in cur.description],
-                "rows": rows[:MAX_ROWS],
-                "truncated": len(rows) > MAX_ROWS,
+                "rows": rows,
+                "more": len(rows) == PAGE_ROWS,       # puede haber más (se sabe al pedir la página siguiente)
             }
         if kw in DML:
             return {"message": f"{cur.rowcount} filas afectadas (pendiente de Commit)"}
@@ -201,11 +255,13 @@ class OracleSession:
             except oracledb.Error:
                 pass
 
-    def _deliver_output(self, cur, on_output):
+    def _deliver_output(self, on_output):
+        """Lee DBMS_OUTPUT con otro cursor: el de la consulta puede quedar abierto para paginar."""
         if not self.output_enabled:
             return
         try:
-            lines = read_dbms_output(cur)
+            with self.conn.cursor() as cur:
+                lines = read_dbms_output(cur)
         except Exception:
             return
         if lines and on_output:

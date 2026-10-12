@@ -7,8 +7,16 @@
 
 ## GitHub Actions
 - `.github/workflows/tests.yml`: ruff + pytest en Windows y Linux, Python 3.10 y 3.13.
-- `.github/workflows/release.yml`: al subir `vX.Y.Z` compila con PyInstaller, corre `MiniSQL.exe --self-test`,
+- `.github/workflows/release.yml` (también `workflow_call` desde version.yml): al subir `vX.Y.Z` compila con PyInstaller, corre `MiniSQL.exe --self-test`,
   calcula `MiniSQL.exe.sha256` y publica ambos en Releases (prerelease si la etiqueta tiene `-`).
+
+## Versión automática con [CI]
+- `.github/workflows/version.yml`: push a main con `[CI]`, `[CI minor]` o `[CI major]` en algún commit →
+  `packaging/bump_version.py` decide el número (si `__version__` no tiene etiqueta, ese mismo; si no, sube; gana
+  la subida más grande del push) → el bot hace el commit «Versión X.Y.Z» → llama a release.yml (`workflow_call`
+  con `tag` y `ref`). El Release crea la etiqueta al final: si algo falla no queda etiqueta y el siguiente [CI]
+  reintenta el mismo número. Los commits/etiquetas del bot (GITHUB_TOKEN) no disparan workflows: sin ciclos.
+- Pruebas: `tests/test_bump_version.py`. Si se protege main, el bot necesita permiso para hacer push.
 
 ## Ejecutable
 - `packaging/MiniSQL.spec`: un solo .exe sin consola. `.gitignore` ignora `*.spec` salvo este.

@@ -9,8 +9,8 @@ Pruebas: `tests/test_session.py`, `test_objects.py`, `test_guard.py`, con `FakeC
   `opener` guarda cómo abrir una tercera (depurador); la contraseña solo vive ahí, en memoria.
 - Candados: `lock` (principal) y uno de metadatos. `busy`, `wait_free(timeout)`; si la principal está
   ocupada se lanza `SessionBusy` en vez de esperar.
-- `execute(sql, on_output)` → dict `{columns, rows, rowcount, elapsed, message, txn, output…}`;
-  máximo `MAX_ROWS` filas (config.py). `execute_with_rowid` agrega `rowids` (ver grilla.md).
+- `execute(sql, on_output)` → dict `{headers, rows, more, stream, elapsed, message, txn…}`; la primera página
+  (`PAGE_ROWS`); `stream` (RowStream) trae las siguientes (ver grilla.md). `execute_with_rowid` agrega `rowids` (ver grilla.md).
   `execute_script(sentencias)`: varias en orden con un solo candado; para en la primera que falla
   (`ScriptError` dice cuál y si las anteriores quedaron pendientes de Commit).
 - `apply_grid_changes(owner, table, ops)`, `commit`, `rollback`, `cancel` (cancela la llamada en curso),

@@ -2,6 +2,8 @@
 
 Los cambios se guardan por ROWID en la sesión principal y quedan pendientes de Commit, como cualquier DML.
 """
+import threading
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -19,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..config import MAX_ROWS, PAGE_ROWS
 from ..db.catalog import resolve_object
 from ..db.grid import fetch_columns_info, preview_sql
 from ..sql.editable import editable_target
@@ -42,6 +45,10 @@ class ResultPanel(QWidget):
         self.conn_tab = conn_tab
         self.target = None             # (dueño, tabla) si los resultados se pueden editar
         self.saving = False
+        self.stream = None             # cursor abierto en Oracle para traer las páginas siguientes
+        self.fetching = False
+        self.saved_uncommitted = False # se guardaron cambios de la grilla que esperan Commit/Rollback
+        conn_tab.transaction_ended.connect(self._transaction_ended)
 
         self.view = ResultView()
         self.view.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -58,6 +65,7 @@ class ResultPanel(QWidget):
         self.filter_column.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.count = QLabel("")
         self.count.setStyleSheet(f"color: {MUTED_COLOR};")
+        self.count.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)   # el contador no se corta
         self.state = QLabel("")
         self.state.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.state.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)   # el estado se ve completo
@@ -70,13 +78,21 @@ class ResultPanel(QWidget):
                                 self.save)
         self.cancel_btn = _button("✖ Cancelar", "Descartar los cambios que no se guardaron", self.cancel)
         self.edit_buttons = (self.add_btn, self.dup_btn, self.del_btn)
+        self.prev_btn = _button("◀", "Página anterior", self.prev_page)
+        self.page_label = QLabel("")
+        self.next_btn = _button("▶", f"Página siguiente (trae {PAGE_ROWS} filas más de Oracle si hace falta)",
+                                self.next_page)
+        self.all_btn = _button("⏬ Todas", f"Traer todas las filas que faltan (hasta {MAX_ROWS:,})".replace(",", "."),
+                               self.fetch_all)
+        self.prev_btn.setArrowType(Qt.LeftArrow)
+        self.next_btn.setArrowType(Qt.RightArrow)
+        self.paging = (self.prev_btn, self.page_label, self.next_btn, self.all_btn)
 
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)
         bar.addWidget(self.filter_edit, 1)                 # el filtro cede espacio si falta
         bar.addWidget(self.filter_column)
-        bar.addWidget(self.count)
-        bar.addSpacing(12)
+        bar.addSpacing(8)
         bar.addWidget(self.state)
         for b in (*self.edit_buttons, self.save_btn, self.cancel_btn):
             bar.addWidget(b)
@@ -86,6 +102,14 @@ class ResultPanel(QWidget):
         layout.setSpacing(2)
         layout.addLayout(bar)
         layout.addWidget(self.view, 1)
+        footer = QHBoxLayout()                             # debajo de la tabla: cuántas filas y las páginas
+        footer.setContentsMargins(4, 0, 0, 0)
+        footer.addWidget(self.count)
+        footer.addSpacing(8)
+        for w in self.paging:
+            footer.addWidget(w)
+        footer.addStretch(1)
+        layout.addLayout(footer)
 
         self.filter_timer = QTimer(self)
         self.filter_timer.setSingleShot(True)
@@ -109,15 +133,18 @@ class ResultPanel(QWidget):
         """Muestra el resultado de una consulta. Si trae ROWID y es de una sola tabla, se puede editar."""
         headers, rows = res["headers"], res["rows"]
         target, reason = editable_target(sql) if sql else (None, None)
+        self._close_stream()
+        self.stream, self.fetching = res.get("stream"), False
+        self.saved_uncommitted = False
         if res.get("rowids") is not None and target is not None:
-            model = EditableResultModel(headers, rows, res["rowids"], self.view.theme)
+            model = EditableResultModel(headers, rows, res["rowids"], self.view.theme, PAGE_ROWS)
             model.changed.connect(self._update_buttons)
             model.changed.connect(self._update_count)
             model.rejected.connect(lambda msg: self._set_state(f"✖ {msg}", ERROR_COLOR))
             self._load_columns(model, target)
             self._set_state("Revisando si se puede editar…", MUTED_COLOR)
         else:
-            model = ResultModel(headers, rows, self.view.theme)
+            model = ResultModel(headers, rows, self.view.theme, PAGE_ROWS)
             if res.get("not_editable"):           # Oracle no dio el ROWID (p. ej. ORA-01446)
                 reason = "Oracle no permite identificar las filas de este resultado"
             self._set_state(f"🔒 Solo lectura: {reason}" if reason else "", MUTED_COLOR)
@@ -182,8 +209,99 @@ class ResultPanel(QWidget):
 
     def _update_count(self):
         model = self.model
-        shown, total = len(model.rows), len(model.all_rows)
-        self.count.setText(f"{shown} de {total} filas" if shown != total else (f"{total} filas" if total else ""))
+        more = self.has_more()
+        loaded, matching = len(model.all_rows), len(model.filtered)
+        plus = "+" if more else ""
+        if model.matcher is not None:
+            text = f"{matching} de {loaded}{plus} filas"           # las que cumplen el filtro
+        else:
+            text = f"{loaded}{plus} filas" if loaded or more else ""
+        if model.rows and (more or model.page_count() > 1):      # varias páginas: qué filas se ven
+            first = model.first_number
+            text = f"{first}-{first + len(model.rows) - 1} · {text}"
+        self.count.setText("Trayendo filas…" if self.fetching else text)
+        self.count.setToolTip("El filtro y el orden se aplican a las filas ya cargadas. "
+                              "⏬ Todas trae las que faltan." if more else "")
+        self._update_paging()
+
+    # --- páginas
+    def has_more(self):
+        """¿Quedan filas en Oracle sin traer?"""
+        return self.stream is not None and not self.stream.done
+
+    def _update_paging(self):
+        model = self.model
+        if model is None:
+            return
+        more, pages = self.has_more(), model.page_count()
+        visible = more or pages > 1
+        for w in self.paging:
+            w.setVisible(visible)
+        self.page_label.setText(f"Pág. {model.page + 1}/{pages}{'+' if more else ''}")
+        self.prev_btn.setEnabled(not self.fetching and model.page > 0)
+        self.next_btn.setEnabled(not self.fetching and (model.page < pages - 1 or more))
+        self.all_btn.setEnabled(not self.fetching and more and len(model.all_rows) < MAX_ROWS)
+
+    def prev_page(self):
+        model = self.model
+        if model is not None and model.page > 0:
+            model.set_page(model.page - 1)
+            self._update_count()
+
+    def next_page(self):
+        model = self.model
+        if model is None or self.fetching:
+            return
+        if model.page < model.page_count() - 1:
+            model.set_page(model.page + 1)
+            self._update_count()
+        elif self.has_more():
+            self._fetch(PAGE_ROWS)
+
+    def fetch_all(self):
+        if self.has_more() and not self.fetching:
+            self._fetch(None)
+
+    def _fetch(self, n):
+        """Trae n filas más (o todas las que faltan, hasta MAX_ROWS) en un hilo."""
+        stream, model = self.stream, self.model
+        limit = MAX_ROWS - len(model.all_rows)
+        self.fetching = True
+        self._update_count()
+
+        def ok(result):
+            if self.model is not model:
+                return                                   # llegó otro resultado mientras tanto
+            self.fetching = False
+            rows, rowids = result
+            page = model.page
+            if rows:
+                model.append_rows(rows, rowids)
+            if n and model.page_count() - 1 > page:
+                model.set_page(page + 1)                 # ▶: mostrar la página que se acaba de traer
+            if not stream.done and len(model.all_rows) >= MAX_ROWS:
+                self._set_state(f"Se cargó el máximo de {MAX_ROWS:,} filas".replace(",", "."), MUTED_COLOR)
+            self._update_count()
+
+        def failed(msg):
+            if self.model is not model:
+                return
+            self.fetching = False
+            self._set_state(f"✖ No se pudieron traer más filas: {msg.splitlines()[0]}", ERROR_COLOR, msg)
+            self._update_count()
+
+        fn = (lambda: stream.fetch(n)) if n else (lambda: stream.fetch_all(limit))
+        self.conn_tab.runner.run(fn, ok, failed)
+
+    def _close_stream(self):
+        stream, self.stream = self.stream, None
+        if stream is not None and not stream.done:
+            # cerrarlo toma el candado de la sesión: en un hilo, por si otra hoja está ejecutando
+            threading.Thread(target=stream.close, daemon=True).start()
+
+    def dispose(self):
+        """La hoja o el visor se cierra: libera el cursor abierto en Oracle."""
+        self._close_stream()
 
     def _focus_filter(self):
         self.filter_edit.setFocus()
@@ -259,6 +377,7 @@ class ResultPanel(QWidget):
             self.conn_tab.set_pending(True if txn is None else bool(txn))
             done = ", ".join(f"{n} {k}" for k, n in summary.items() if n)
             self._set_state(f"✔ Guardado ({done}) · pendiente de Commit", WARN_COLOR)
+            self.saved_uncommitted = True
             self._update_buttons()
 
         def failed(msg):
@@ -273,6 +392,17 @@ class ResultPanel(QWidget):
         """Muestra las sentencias que se van a ejecutar y devuelve True si el usuario confirma."""
         dialog = SavePreviewDialog(".".join(self.target), statements, summary, self)
         return dialog.exec() == QDialog.Accepted
+
+    def _transaction_ended(self, how):
+        """Commit o Rollback en la conexión: el aviso "pendiente de Commit" ya no vale."""
+        if not self.saved_uncommitted:
+            return
+        self.saved_uncommitted = False
+        if how == "Commit":
+            self._set_state("✔ Cambios confirmados (Commit)", OK_COLOR)
+        else:
+            self._set_state("↺ Rollback: se deshicieron los cambios guardados. Vuelve a ejecutar la consulta "
+                            "para ver los datos actuales", WARN_COLOR)
 
     # --- estado y botones
     def _set_state(self, text, color, tip=None):

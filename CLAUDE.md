@@ -15,7 +15,8 @@ GitHub Actions (`.github/workflows/tests.yml`) corre ruff y pytest en Windows y 
 Dependencias: `pyproject.toml` es la fuente; requirements*.txt las repiten para instalar rápido.
 Ejecutable: `packaging/MiniSQL.spec` (PyInstaller, un .exe sin consola). `.github/workflows/release.yml` lo compila,
 corre `MiniSQL.exe --self-test` (`minisql/selftest.py`) y lo publica en Releases (con `MiniSQL.exe.sha256`) al subir
-una etiqueta `vX.Y.Z` igual a `__version__` de `minisql/__init__.py`, única fuente de la versión. La app instalada
+una etiqueta `vX.Y.Z` igual a `__version__` de `minisql/__init__.py`, única fuente de la versión, o con un commit
+a main que diga `[CI]`/`[CI minor]`/`[CI major]` (`version.yml` + `packaging/bump_version.py`). La app instalada
 se actualiza sola (`minisql/update.py` + `ui/updates.py`, ver docs/contexto/release.md). Si se agrega una dependencia que se importa en tiempo de ejecución o desde código
 compilado (como `cryptography` en el modo thin de oracledb), declararla en `hiddenimports` del .spec y cubrirla en selftest.
 

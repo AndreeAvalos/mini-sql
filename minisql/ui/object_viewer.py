@@ -1,7 +1,6 @@
 """Pestaña de un objeto de la base: columnas, datos, código, índices, etc."""
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QPushButton, QTabWidget, QVBoxLayout, QWidget
 
-from ..config import MAX_ROWS
 from ..db.catalog import WITH_DATA, kind_label
 from ..db.object_tabs import Text, fetch_object_tab
 from ..sql.text import q
@@ -176,7 +175,7 @@ class ObjectViewer(QWidget):
     def _data_done(self, res):
         self.running = False
         self.data_panel.show_result(res, self.data_sql)
-        more = f" (solo las primeras {MAX_ROWS})" if res["truncated"] else ""
+        more = " (primera página: ▶ trae la siguiente)" if res.get("more") else ""
         self.status.show_message(f"{len(res['rows'])} filas{more}  ·  {res['elapsed']:.2f} s")
 
     def _data_failed(self, msg):

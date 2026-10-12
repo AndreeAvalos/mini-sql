@@ -39,6 +39,7 @@ class ConnectionTab(QWidget):
     """Una conexión abierta. Organiza sus pestañas (hojas de SQL y visores de objetos), la
     transacción pendiente y el cierre. Lo que habla con Oracle está en `db` (OracleSession)."""
     pending_changed = Signal()
+    transaction_ended = Signal(str)   # "Commit" o "Rollback": lo pendiente ya no está pendiente
     CLOSE_WAIT_S = 10       # cuánto esperar a que Oracle atienda la cancelación al cerrar
 
     def __init__(self, db, name, dsn_label=None):
@@ -158,6 +159,9 @@ class ConnectionTab(QWidget):
             if not self._confirm("Cerrar hoja", f"¿Cerrar {self.sheets.tabText(i)}? Se perderá el SQL que contiene."):
                 return
         self.sheets.removeTab(i)
+        panel = sheet.data_panel if isinstance(sheet, ObjectViewer) else sheet.results
+        if panel is not None:
+            panel.dispose()                      # cierra el cursor que quedó abierto para paginar
         sheet.deleteLater()
         if self.current_sheet() is None:
             self.add_sheet()                 # siempre queda al menos una hoja de SQL
@@ -235,6 +239,10 @@ class ConnectionTab(QWidget):
         kw = res.get("kw", "")
         if kw in DDL:
             self.completion.clear()   # pudieron cambiar tablas o columnas
+        if kw == "ROLLBACK":
+            self.transaction_ended.emit("Rollback")
+        elif kw == "COMMIT" or kw in DDL:            # el DDL hace COMMIT de lo pendiente
+            self.transaction_ended.emit("Commit")
         if res.get("txn") is not None:
             self.set_pending(bool(res["txn"]))
         elif kw in DML or kw in ("BEGIN", "DECLARE", "CALL"):
@@ -268,6 +276,7 @@ class ConnectionTab(QWidget):
             QMessageBox.critical(self, f"Error en {label}", str(e))
             return False
         self.set_pending(False)
+        self.transaction_ended.emit(label)
         return True
 
     # --- guardián de sesión: lo que se guarda para no perder nada

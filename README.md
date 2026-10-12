@@ -19,7 +19,9 @@ explorador de objetos, autocompletado, edición y compilación de paquetes, y de
   valor contra la columna (tipo, largo, decimales, NOT NULL). **Guardar** muestra antes las sentencias que se
   van a ejecutar, aplica los cambios por ROWID y quedan pendientes de Commit; **Cancelar** los descarta.
 - **Filtrar y ordenar** los resultados: texto libre, `=valor`, `>100`, `<=2026-01-31`, `null`, `!null`.
-- **Ejecución sin congelar la ventana**, con cancelación, tiempo transcurrido y hasta 1000 filas por consulta.
+- **Paginación:** se traen de Oracle **200 filas por página**; ▶ trae la siguiente y «⏬ Todas» el resto (hasta
+  100.000). El filtro y el orden se aplican a las filas ya cargadas.
+- **Ejecución sin congelar la ventana**, con cancelación y tiempo transcurrido.
   Ctrl+Enter ejecuta la sentencia donde está el cursor (se separan con una línea en blanco). Si ese bloque o la
   selección tiene varias sentencias terminadas en `;` (o bloques PL/SQL terminados en `/`), se ejecutan en orden
   como un script y se detiene en la primera que falla.
@@ -147,6 +149,12 @@ python docs/generar_capturas.py   # vuelve a generar las imágenes de este READM
 ```
 
 ### Publicar una versión
+
+**Automático:** escribe `[CI]` en el mensaje de un commit a `main` (`[CI minor]` o `[CI major]` para subir el
+número del medio o el primero). GitHub Actions (`version.yml`) sube la versión, hace el commit «Versión X.Y.Z»
+(después haz `git pull`) y publica. Si el número de `__version__` todavía no se publicó, sale ese mismo.
+
+**A mano:**
 
 1. Sube `__version__` en `minisql/__init__.py` (por ejemplo `0.2.0`; una versión de prueba: `0.3.0-beta.1`) y
    haz commit. Es el único lugar de la versión: pyproject.toml, el .exe y el actualizador la leen de ahí.

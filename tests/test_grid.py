@@ -268,3 +268,21 @@ def test_cancel_in_preview_saves_nothing(app, editable_sheet, monkeypatch):
     panel.save()
     assert dialogs and "UPDATE SCOTT.EMP" in dialogs[0] and "SET A = 3" in dialogs[0]
     assert not FakeCursor.executed and model.has_changes()                # no se ejecutó nada
+
+
+def test_commit_or_rollback_clears_the_pending_message(app, editable_sheet, monkeypatch):
+    tab, sheet = editable_sheet
+    panel, model = sheet.results, sheet.results.model
+    monkeypatch.setattr(panel, "confirm_save", lambda stmts, summary: True)
+    monkeypatch.setattr(FakeConn, "transaction_in_progress", True)
+    model.setData(cell(sheet, 0, 0), "3")
+    panel.save()
+    assert wait_until(app, lambda: "pendiente de Commit" in panel.state.text())
+    assert tab.commit()
+    assert "confirmados" in panel.state.text() and "pendiente" not in panel.state.text()
+
+    model.setData(cell(sheet, 0, 0), "4")
+    panel.save()
+    assert wait_until(app, lambda: "pendiente de Commit" in panel.state.text())
+    assert tab.rollback()
+    assert "Rollback" in panel.state.text() and "pendiente" not in panel.state.text()

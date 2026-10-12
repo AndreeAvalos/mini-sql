@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..config import MAX_ROWS
 from ..sql.completion import completion_target, table_refs
 from ..sql.editable import editable_target
 from ..sql.text import (
@@ -316,7 +315,7 @@ class SheetWidget(QWidget):
             self.result_tabs.setCurrentWidget(self.results)
         if "headers" in res:
             self.model = self.results.show_result(res, self.last_sql)
-            more = f" (solo las primeras {MAX_ROWS})" if res["truncated"] else ""
+            more = " (primera página: ▶ trae la siguiente)" if res.get("more") else ""
             script = f"{res['message']}  ·  última consulta: " if res.get("script") else ""
             self.set_status(f"{script}{len(res['rows'])} filas{more}  ·  {res['elapsed']:.2f} s")
         else:

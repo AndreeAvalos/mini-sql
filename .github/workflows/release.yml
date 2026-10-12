@@ -1,13 +1,24 @@
 name: Publicar .exe
 
-# Se publica una versión al subir una etiqueta igual a __version__ de minisql/__init__.py:
-#     git tag v0.2.0  &&  git push origin v0.2.0
-# La app instalada la detecta sola (ver minisql/update.py).
-# También se puede correr a mano (pestaña Actions > Publicar .exe > Run workflow): solo deja el .exe
-# como artefacto descargable, sin crear un Release.
+# Se publica una versión de tres maneras:
+#   1. Subiendo una etiqueta igual a __version__ de minisql/__init__.py:  git tag v0.2.0 && git push origin v0.2.0
+#   2. Con un commit a main que diga [CI], [CI minor] o [CI major]: version.yml sube la versión, crea la
+#      etiqueta y llama a este workflow (workflow_call).
+#   3. A mano (Actions > Publicar .exe > Run workflow): solo deja el .exe como artefacto, sin Release.
+# La app instalada detecta la versión nueva sola (ver minisql/update.py).
 on:
   push:
     tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: Etiqueta a publicar (vX.Y.Z); el Release la crea en el commit `ref`
+        required: true
+        type: string
+      ref:
+        description: Commit a compilar y etiquetar
+        required: true
+        type: string
   workflow_dispatch:
 
 permissions:
@@ -16,8 +27,14 @@ permissions:
 jobs:
   windows-exe:
     runs-on: windows-latest
+    env:
+      # La etiqueta a publicar: la que llega de version.yml o la que se subió. Vacía = solo artefacto.
+      TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name || '') }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}      # llamado desde version.yml: el commit de la versión nueva
+          fetch-depth: 0                             # notas del release: los commits desde la etiqueta anterior
 
       - uses: actions/setup-python@v5
         with:
@@ -31,13 +48,13 @@ jobs:
         run: pip install -r requirements.txt -r requirements-dev.txt "pyinstaller>=6.10,<7"
 
       - name: La etiqueta coincide con la versión de minisql/__init__.py
-        if: startsWith(github.ref, 'refs/tags/')
+        if: env.TAG != ''
         shell: python
         run: |
           import os, re
           text = open("minisql/__init__.py", encoding="utf-8").read()
           version = re.search(r'__version__\s*=\s*"([^"]+)"', text).group(1)
-          tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          tag = os.environ["TAG"].removeprefix("v")
           assert tag == version, f"La etiqueta v{tag} no coincide con __version__ = {version} de minisql/__init__.py"
 
       - name: Pruebas
@@ -67,19 +84,21 @@ jobs:
       - name: Guardar el .exe como artefacto
         uses: actions/upload-artifact@v4
         with:
-          name: MiniSQL-${{ github.ref_name }}
+          name: MiniSQL-${{ env.TAG || github.ref_name }}
           path: |
             dist/MiniSQL.exe
             dist/MiniSQL.exe.sha256
           if-no-files-found: error
 
       - name: Publicar en Releases
-        if: startsWith(github.ref, 'refs/tags/')
+        if: env.TAG != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ inputs.ref || github.sha }}   # la etiqueta nueva apunta al commit compilado
           files: |
             dist/MiniSQL.exe
             dist/MiniSQL.exe.sha256
           generate_release_notes: true
           # v0.3.0-beta.1 → versión de prueba: solo la reciben quienes activan "Incluir versiones de prueba"
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(env.TAG, '-') }}

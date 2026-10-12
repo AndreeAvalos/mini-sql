@@ -252,3 +252,22 @@ def test_restart_is_cancelled_if_the_window_does_not_close(app, tmp_path, monkey
     monkeypatch.setattr(w, "close", lambda: False)                 # p. ej. dijo "No" a cerrar con un Commit pendiente
     w.updates.restart_now()
     assert not w.updates.restart and w.updates.pending and exe.read_text() == "vieja"
+
+
+def test_child_exe_does_not_inherit_pyinstaller_environment(tmp_path):
+    """Si el .exe nuevo hereda _PYI_* del viejo, usa sus archivos de Temp/_MEIxxxx, que se borran al cerrarse
+    el viejo: "shiboken6/libshiboken does not exist". Se abre siempre con un entorno limpio."""
+    base = {"PATH": "x", "_PYI_APPLICATION_HOME_DIR": "C:/Temp/_MEI1", "_PYI_PARENT_PROCESS_LEVEL": "1",
+            "_PYI_ARCHIVE_FILE": "viejo.exe", "_MEIPASS2": "C:/Temp/_MEI1"}
+    env = update.clean_env(base)
+    assert env == {"PATH": "x", "PYINSTALLER_RESET_ENVIRONMENT": "1"}
+
+    launched = []
+    update.relaunch(tmp_path / "MiniSQL.exe", popen=lambda args, **kw: launched.append(kw["env"]))
+    assert launched[0]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
+
+    class Done:
+        returncode, stdout, stderr = 0, "", ""
+    seen = []
+    update.self_test(tmp_path / "MiniSQL-9.exe", run=lambda args, **kw: seen.append(kw["env"]) or Done())
+    assert seen[0]["PYINSTALLER_RESET_ENVIRONMENT"] == "1" and not any(k.startswith("_PYI_") for k in seen[0])

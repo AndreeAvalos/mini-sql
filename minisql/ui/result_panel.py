@@ -25,6 +25,7 @@ from ..config import MAX_ROWS, PAGE_ROWS
 from ..db.catalog import resolve_object
 from ..db.grid import fetch_columns_info, preview_sql
 from ..sql.editable import editable_target
+from .busy_overlay import BusyOverlay
 from .results import EditableResultModel, ResultModel, ResultView
 from .save_preview import SavePreviewDialog
 from .style import ERROR_COLOR, MUTED_COLOR, OK_COLOR, WARN_COLOR
@@ -110,6 +111,7 @@ class ResultPanel(QWidget):
             footer.addWidget(w)
         footer.addStretch(1)
         layout.addLayout(footer)
+        self.overlay = BusyOverlay(self)                   # "Ejecutando…" encima, bloquea lo anterior
 
         self.filter_timer = QTimer(self)
         self.filter_timer.setSingleShot(True)
@@ -123,6 +125,25 @@ class ResultPanel(QWidget):
             sc.activated.connect(slot)
         self._set_state("", "")
         self._update_buttons()
+
+    # --- ocupado: ejecutando, guardando o trayendo filas
+    @property
+    def busy(self):
+        return self.overlay.active
+
+    def set_busy(self, text, on_cancel=None):
+        """text: qué se está haciendo (tapa los resultados y no deja tocarlos); None: terminó.
+        on_cancel: si se da, la capa muestra un botón Cancelar."""
+        if text:
+            self.filter_timer.stop()
+            self.overlay.start(text, on_cancel)
+        else:
+            self.overlay.stop()
+        for w in (self.view, self.filter_edit, self.filter_column):
+            w.setEnabled(not text)                         # tampoco con el teclado (F2, escribir, Ctrl+C…)
+        self._update_buttons()
+        if self.model is not None:
+            self._update_count()
 
     # --- mostrar resultados
     @property
@@ -219,7 +240,7 @@ class ResultPanel(QWidget):
         if model.rows and (more or model.page_count() > 1):      # varias páginas: qué filas se ven
             first = model.first_number
             text = f"{first}-{first + len(model.rows) - 1} · {text}"
-        self.count.setText("Trayendo filas…" if self.fetching else text)
+        self.count.setText(text)
         self.count.setToolTip("El filtro y el orden se aplican a las filas ya cargadas. "
                               "⏬ Todas trae las que faltan." if more else "")
         self._update_paging()
@@ -238,19 +259,20 @@ class ResultPanel(QWidget):
         for w in self.paging:
             w.setVisible(visible)
         self.page_label.setText(f"Pág. {model.page + 1}/{pages}{'+' if more else ''}")
-        self.prev_btn.setEnabled(not self.fetching and model.page > 0)
-        self.next_btn.setEnabled(not self.fetching and (model.page < pages - 1 or more))
-        self.all_btn.setEnabled(not self.fetching and more and len(model.all_rows) < MAX_ROWS)
+        idle = not self.fetching and not self.busy
+        self.prev_btn.setEnabled(idle and model.page > 0)
+        self.next_btn.setEnabled(idle and (model.page < pages - 1 or more))
+        self.all_btn.setEnabled(idle and more and len(model.all_rows) < MAX_ROWS)
 
     def prev_page(self):
         model = self.model
-        if model is not None and model.page > 0:
+        if model is not None and model.page > 0 and not self.busy:
             model.set_page(model.page - 1)
             self._update_count()
 
     def next_page(self):
         model = self.model
-        if model is None or self.fetching:
+        if model is None or self.fetching or self.busy:
             return
         if model.page < model.page_count() - 1:
             model.set_page(model.page + 1)
@@ -259,7 +281,7 @@ class ResultPanel(QWidget):
             self._fetch(PAGE_ROWS)
 
     def fetch_all(self):
-        if self.has_more() and not self.fetching:
+        if self.has_more() and not self.fetching and not self.busy:
             self._fetch(None)
 
     def _fetch(self, n):
@@ -267,12 +289,13 @@ class ResultPanel(QWidget):
         stream, model = self.stream, self.model
         limit = MAX_ROWS - len(model.all_rows)
         self.fetching = True
-        self._update_count()
+        self.set_busy("Trayendo filas…", self.conn_tab.db.cancel)
 
         def ok(result):
             if self.model is not model:
                 return                                   # llegó otro resultado mientras tanto
             self.fetching = False
+            self.set_busy(None)
             rows, rowids = result
             page = model.page
             if rows:
@@ -287,6 +310,7 @@ class ResultPanel(QWidget):
             if self.model is not model:
                 return
             self.fetching = False
+            self.set_busy(None)
             self._set_state(f"✖ No se pudieron traer más filas: {msg.splitlines()[0]}", ERROR_COLOR, msg)
             self._update_count()
 
@@ -310,6 +334,8 @@ class ResultPanel(QWidget):
     # --- edición
     def _editable_model(self):
         model = self.model
+        if self.busy:
+            return None                                  # ocupado: lo que se ve está por cambiar
         return model if isinstance(model, EditableResultModel) and self.target else None
 
     def has_unsaved_changes(self):
@@ -367,11 +393,11 @@ class ResultPanel(QWidget):
         if not self.confirm_save(preview_sql(owner, table, ops), summary):
             return
         self.saving = True
-        self._update_buttons()
-        self._set_state("Guardando…", MUTED_COLOR)
+        self.set_busy("Guardando…")
 
         def ok(result):
             self.saving = False
+            self.set_busy(None)
             model.mark_saved(result["rowids"])
             txn = result.get("txn")
             self.conn_tab.set_pending(True if txn is None else bool(txn))
@@ -382,6 +408,7 @@ class ResultPanel(QWidget):
 
         def failed(msg):
             self.saving = False
+            self.set_busy(None)
             self._set_state(f"✖ No se guardó nada: {msg.splitlines()[0]}", ERROR_COLOR)
             self.state.setToolTip(msg)
             self._update_buttons()
@@ -411,13 +438,13 @@ class ResultPanel(QWidget):
         self.state.setStyleSheet(f"color: {color};" if color else "")
 
     def _update_buttons(self):
+        shown = isinstance(self.model, EditableResultModel) and self.target is not None   # aunque esté ocupado
         editable = self._editable_model() is not None and not self.saving
         changes = editable and self.model.has_changes()
+        for b in (*self.edit_buttons, self.save_btn, self.cancel_btn):
+            b.setVisible(shown)
         for b in self.edit_buttons:
-            b.setVisible(self._editable_model() is not None)
             b.setEnabled(editable)
-        self.save_btn.setVisible(self._editable_model() is not None)
-        self.cancel_btn.setVisible(self._editable_model() is not None)
         self.save_btn.setEnabled(bool(changes))
         self.cancel_btn.setEnabled(bool(changes))
 

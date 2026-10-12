@@ -30,7 +30,7 @@
   releases sin MiniSQL.exe), `should_check` (1 vez al día), `download` (a `~/.minisql/actualizaciones`, `.part`
   hasta verificar SHA-256 del `.sha256` publicado o el `digest` de GitHub; sin huella no instala), `self_test` del
   .exe nuevo, `install` (renombra el actual a `MiniSQL.old.exe` y mueve el nuevo; si falla, deshace),
-  `rollback` (intercambia), `clean_downloads`, `relaunch`.
+  `rollback` (intercambia), `clean_downloads`, `relaunch`. **Abrir otro .exe siempre con `clean_env()`** (`PYINSTALLER_RESET_ENVIRONMENT=1`, sin `_PYI_*`): si hereda el entorno del .exe viejo usa su Temp/_MEIxxxx, que se borra al cerrarse → "shiboken6/libshiboken does not exist".
 - `minisql/ui/updates.py`: `UpdateManager` (aviso `UpdateBanner`, menú ⋯ con buscar/auto/prueba/volver atrás/acerca
   de, descarga con `QProgressDialog`). Solo revisa sola en el .exe (`frozen`); desde el código no hace red ni
   escribe config.json. Ajustes en config.json → `"updates"`: auto, prerelease, last_check, skip, previous_version,

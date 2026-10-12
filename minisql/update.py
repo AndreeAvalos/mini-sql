@@ -186,12 +186,23 @@ def download(release, dest_dir, progress=None, cancelled=lambda: False, opener=u
             part.unlink()
 
 
+def clean_env(base=None):
+    """Entorno para abrir otro MiniSQL.exe desde este. El .exe de PyInstaller deja variables (_PYI_*, _MEIPASS2)
+    que le dicen a un proceso hijo "usa mis archivos ya desempaquetados en Temp/_MEIxxxx". Si el hijo es otro
+    .exe y las hereda, usa los archivos de este, y al cerrarse este se borran: el nuevo falla con
+    "shiboken6/libshiboken does not exist". PYINSTALLER_RESET_ENVIRONMENT hace que el hijo arranque de cero."""
+    env = {k: v for k, v in (os.environ if base is None else base).items()
+           if not k.upper().startswith(("_PYI_", "_MEIPASS"))}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
 def self_test(exe, timeout=180, run=subprocess.run):
     """Corre el .exe nuevo con --self-test antes de instalarlo. Devuelve (ok, informe)."""
     exe = Path(exe)
     try:
         result = run([str(exe), "--self-test"], cwd=str(exe.parent), timeout=timeout,
-                     capture_output=True, text=True)
+                     capture_output=True, text=True, env=clean_env())   # que pruebe SUS archivos, no los nuestros
     except Exception as e:
         return False, str(e)
     log = exe.parent / "selftest.log"
@@ -262,4 +273,4 @@ def clean_downloads(dest_dir, keep=None):
 def relaunch(exe, popen=subprocess.Popen):
     """Abre el .exe (después de soltar el candado de instancia única), separado de este proceso."""
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    popen([str(exe)], cwd=str(Path(exe).parent), close_fds=True, creationflags=flags)
+    popen([str(exe)], cwd=str(Path(exe).parent), close_fds=True, creationflags=flags, env=clean_env())

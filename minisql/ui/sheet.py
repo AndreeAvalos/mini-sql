@@ -41,7 +41,6 @@ from .workers import Emitter
 class SheetWidget(QWidget):
     """Hoja de SQL: editor con colores y autocompletado, y abajo los resultados y DBMS_OUTPUT.
     Ejecuta en la sesión principal de su conexión (conn_tab), en un hilo."""
-    SPINNER = "◐◓◑◒"
 
     def __init__(self, conn_tab):
         super().__init__()
@@ -60,13 +59,7 @@ class SheetWidget(QWidget):
         self.format_btn = QPushButton("≡ Formatear  (Ctrl+Shift+F)")
         self.status = StatusLabel("Listo")
 
-        # animación mientras se ejecuta: spinner + segundos transcurridos
-        self.spin_timer = QTimer(self)
-        self.spin_timer.setInterval(120)
-        self.spin_timer.timeout.connect(self._tick)
-        self.spin_frame = 0
         self.run_started = 0.0
-        self.run_text = ""
 
         # resultados: filtro, orden y edición (si la consulta es de una sola tabla)
         self.results = ResultPanel(conn_tab)
@@ -129,24 +122,16 @@ class SheetWidget(QWidget):
             sc.activated.connect(slot)
 
     def set_running(self, running, text=""):
+        """Mientras corre, los resultados anteriores quedan tapados por "Ejecutando…" (no se pueden editar)."""
         self.running = running
         self.run_btn.setEnabled(not running)
         self.cancel_btn.setEnabled(running)
         if running:
-            self.run_text = text
-            self.run_started = time.perf_counter()
-            self.spin_frame = 0
             self.set_status("")
-            self._tick()
-            self.spin_timer.start()
+            self.result_tabs.setCurrentWidget(self.results)
+            self.results.set_busy(text or "Ejecutando…", self.conn_tab.db.cancel)
         else:
-            self.spin_timer.stop()
-
-    def _tick(self):
-        frame = self.SPINNER[self.spin_frame % len(self.SPINNER)]
-        self.spin_frame += 1
-        secs = time.perf_counter() - self.run_started
-        self.status.setText(f"{frame}  {self.run_text}  {secs:.1f} s")
+            self.results.set_busy(None)
 
     def open_object_at_cursor(self):
         """F4: abre el objeto cuyo nombre está bajo el cursor (acepta ESQUEMA.OBJETO y alias de tabla)."""

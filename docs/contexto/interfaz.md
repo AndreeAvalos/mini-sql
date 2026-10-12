@@ -23,7 +23,7 @@ Pruebas: `tests/test_sheet.py`, `test_app.py`, `test_objects.py`, `test_find.py`
 TRUNCATE, DDL con transacción pendiente o con DML antes en el script. 4. Una sentencia: `editable_target` decide
 `with_rowid`; varias: `ConnectionTab.run_script` → `OracleSession.execute_script` (se detiene en la primera que
 falla con `ScriptError`; `on_error` llama `refresh_pending`). 5. `show_running_statement`
-(capa "run"), spinner, `on_output`, `on_done` → `results.show_result(res, sql)`.
+(capa "run"), `set_running` → `results.set_busy` (BusyOverlay sobre los resultados: bloquea lo anterior, spinner, segundos y Cancelar; nada en la barra), `on_output`, `on_done` → `results.show_result(res, sql)`.
 
 ## Editores (editors.py)
 - `SqlEditor`: resaltado (highlighter.py), autocompletado (`CompletionProvider` en completion.py con caché

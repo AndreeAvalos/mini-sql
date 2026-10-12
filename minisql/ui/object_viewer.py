@@ -168,18 +168,20 @@ class ObjectViewer(QWidget):
         if self.running:
             return
         self.running = True
-        self.status.show_message("Cargando datos…" if not self.conn_tab.db.busy
-                                 else "Esperando a que termine la consulta en curso…")
+        self.data_panel.set_busy("Cargando datos…" if not self.conn_tab.db.busy
+                                 else "Esperando a que termine la consulta en curso…", self.conn_tab.db.cancel)
         self.conn_tab.run_statement(self.data_sql, self.emitter, with_rowid=True)
 
     def _data_done(self, res):
         self.running = False
+        self.data_panel.set_busy(None)
         self.data_panel.show_result(res, self.data_sql)
         more = " (primera página: ▶ trae la siguiente)" if res.get("more") else ""
         self.status.show_message(f"{len(res['rows'])} filas{more}  ·  {res['elapsed']:.2f} s")
 
     def _data_failed(self, msg):
         self.running = False
+        self.data_panel.set_busy(None)
         self.loaded.discard("Datos")
         self.status.error(msg)
 

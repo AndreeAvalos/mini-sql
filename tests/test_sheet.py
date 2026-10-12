@@ -3,7 +3,7 @@
 from minisql.ui.connection_tab import ConnectionTab
 from minisql.ui.highlighter import SqlHighlighter
 
-from support import FakeConn, FakeCursor, make_session, pump, run_and_wait
+from support import FakeConn, FakeCursor, make_session, pump, run_and_wait, wait_until
 
 
 def test_format_sheet_is_undoable(app):
@@ -27,13 +27,33 @@ def test_highlighter_states(app):
     assert [doc.findBlockByNumber(i).userState() for i in range(3)] == [2, 1, 0]
 
 
-def test_spinner_while_running(app):
+def test_running_blocks_the_previous_results(app):
+    """El "Ejecutando…" va sobre la tabla (no en la barra) y no deja tocar los resultados anteriores."""
     tab = ConnectionTab(make_session(FakeConn()), "T", "PROD")
     sheet = tab.current_sheet()
+    tab.resize(900, 600)
+    tab.show()
+    run_and_wait(app, sheet, "select * from emp")
+    panel = sheet.results
+    assert wait_until(app, lambda: panel.target is not None)
     sheet.set_running(True, "Ejecutando…")
-    assert sheet.spin_timer.isActive() and "Ejecutando" in sheet.status.text()
+    overlay = panel.overlay
+    assert panel.busy and overlay.isVisible() and overlay.timer.isActive()
+    assert "Ejecutando…" in overlay.label.text() and " s" in overlay.label.text()
+    assert "Ejecutando" not in sheet.status.text()                   # ya no en la barra
+    assert overlay.geometry() == panel.rect() and overlay.cancel_btn.isVisible()
+    assert not panel.view.isEnabled() and not panel.filter_edit.isEnabled()
+    model = panel.model
+    panel.add_row()                                                   # ni con atajos ni con el menú
+    panel.delete_rows()
+    assert not model.has_changes() and not panel.add_btn.isEnabled() and panel.add_btn.isVisible()
+    cancelled = []
+    sheet.conn_tab.db.cancel = lambda: cancelled.append(True)
+    overlay._on_cancel = sheet.conn_tab.db.cancel
+    overlay.cancel_btn.click()
+    assert cancelled and "Cancelando" in overlay.label.text()
     sheet.set_running(False)
-    assert not sheet.spin_timer.isActive()
+    assert not panel.busy and not overlay.isVisible() and panel.view.isEnabled() and panel.add_btn.isEnabled()
 
 
 def test_sheet_runs_query(app):

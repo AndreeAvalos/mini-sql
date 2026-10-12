@@ -4,7 +4,7 @@
 #     dist/MiniSQL.exe --self-test        # verifica el ejecutable (escribe dist/selftest.log)
 #
 # Lo usa .github/workflows/release.yml para publicar el .exe en cada versión.
-import tomllib
+import re
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
@@ -14,9 +14,10 @@ from PyInstaller.utils.win32.versioninfo import (
 
 ROOT = Path(SPECPATH).parent  # noqa: F821  (SPECPATH lo define PyInstaller)
 
-# Versión de Windows (Propiedades > Detalles), tomada de pyproject.toml: un solo lugar para la versión
-VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
-NUMBERS = (*(int(n) for n in VERSION.split(".")[:3]), 0)
+# Versión de Windows (Propiedades > Detalles), tomada de minisql/__init__.py: un solo lugar para la versión
+VERSION = re.search(r'__version__\s*=\s*"([^"]+)"',
+                    (ROOT / "minisql" / "__init__.py").read_text(encoding="utf-8")).group(1)
+NUMBERS = (*(int(n) for n in re.match(r"(\d+)\.(\d+)\.(\d+)", VERSION).groups()), 0)
 VERSION_INFO = VSVersionInfo(
     ffi=FixedFileInfo(filevers=NUMBERS, prodvers=NUMBERS),
     kids=[

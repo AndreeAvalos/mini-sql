@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "minisql"
-version = "0.1.0"
+dynamic = ["version"]                 # se lee de minisql/__init__.py (__version__)
 description = "Cliente de escritorio para Oracle: hojas SQL, explorador de objetos, autocompletado, edición y depuración PL/SQL."
 readme = "README.md"
 license = "MIT"
@@ -37,6 +37,9 @@ minisql = "minisql.app:main"
 [project.urls]
 Repositorio = "https://github.com/AndreeAvalos/mini-sql"
 Problemas = "https://github.com/AndreeAvalos/mini-sql/issues"
+
+[tool.setuptools.dynamic]
+version = { attr = "minisql.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["minisql*"]

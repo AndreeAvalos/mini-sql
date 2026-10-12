@@ -1,6 +1,8 @@
 name: Publicar .exe
 
-# Se publica una versión al subir una etiqueta:  git tag v0.1.0  &&  git push origin v0.1.0
+# Se publica una versión al subir una etiqueta igual a __version__ de minisql/__init__.py:
+#     git tag v0.2.0  &&  git push origin v0.2.0
+# La app instalada la detecta sola (ver minisql/update.py).
 # También se puede correr a mano (pestaña Actions > Publicar .exe > Run workflow): solo deja el .exe
 # como artefacto descargable, sin crear un Release.
 on:
@@ -28,14 +30,15 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt -r requirements-dev.txt "pyinstaller>=6.10,<7"
 
-      - name: La etiqueta coincide con la versión de pyproject.toml
+      - name: La etiqueta coincide con la versión de minisql/__init__.py
         if: startsWith(github.ref, 'refs/tags/')
         shell: python
         run: |
-          import os, tomllib
-          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          import os, re
+          text = open("minisql/__init__.py", encoding="utf-8").read()
+          version = re.search(r'__version__\s*=\s*"([^"]+)"', text).group(1)
           tag = os.environ["GITHUB_REF_NAME"].removeprefix("v")
-          assert tag == version, f"La etiqueta v{tag} no coincide con la versión {version} de pyproject.toml"
+          assert tag == version, f"La etiqueta v{tag} no coincide con __version__ = {version} de minisql/__init__.py"
 
       - name: Pruebas
         env:
@@ -54,16 +57,29 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "La autoprueba del .exe falló (código $($p.ExitCode))" }
           Remove-Item dist\selftest.log
 
+      - name: Huella SHA-256 (el actualizador no instala nada sin verificarla)
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist\MiniSQL.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  MiniSQL.exe" | Out-File dist\MiniSQL.exe.sha256 -Encoding ascii -NoNewline
+          Get-Content dist\MiniSQL.exe.sha256
+
       - name: Guardar el .exe como artefacto
         uses: actions/upload-artifact@v4
         with:
           name: MiniSQL-${{ github.ref_name }}
-          path: dist/MiniSQL.exe
+          path: |
+            dist/MiniSQL.exe
+            dist/MiniSQL.exe.sha256
           if-no-files-found: error
 
       - name: Publicar en Releases
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/MiniSQL.exe
+          files: |
+            dist/MiniSQL.exe
+            dist/MiniSQL.exe.sha256
           generate_release_notes: true
+          # v0.3.0-beta.1 → versión de prueba: solo la reciben quienes activan "Incluir versiones de prueba"
+          prerelease: ${{ contains(github.ref_name, '-') }}

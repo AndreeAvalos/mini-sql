@@ -42,6 +42,16 @@ def _checks():
     else:
         yield "keyring", name
 
+    import ssl
+
+    from . import __version__, update
+    if update.version_key(__version__) is None:
+        raise RuntimeError(f"versión inválida: {__version__!r}")
+    certs = ssl.create_default_context().cert_store_stats()
+    if sys.platform == "win32" and not certs.get("x509_ca"):
+        raise RuntimeError("no se cargaron los certificados de Windows: el actualizador no podría usar HTTPS")
+    yield "actualizador", f"versión {__version__}, {certs.get('x509_ca', 0)} certificados raíz"
+
     from .sql.text import format_sql
     yield "sqlparse", format_sql("select a,b from t where x=1").splitlines()[0]
 
@@ -56,7 +66,11 @@ def _checks():
             raise RuntimeError(f"falta el plugin de ventanas de Qt en {platforms}")
         yield "plugin Windows", "qwindows.dll incluido"
     app = QApplication.instance() or QApplication([])
-    window = MainWindow(session_path=tempfile.mkdtemp(), restore=False)
+    from .ui.updates import UpdateManager
+
+    # sin revisar actualizaciones ni tocar el config.json del usuario
+    window = MainWindow(session_path=tempfile.mkdtemp(), restore=False,
+                        updates=lambda w: UpdateManager(w, load=dict, save=lambda _data: None, frozen=False))
     window.keeper.stop()
     app.processEvents()
     yield "interfaz", f"ventana principal creada ({app.platformName()})"

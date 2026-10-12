@@ -14,8 +14,9 @@ La interfaz, los mensajes y los comentarios están en español.
 GitHub Actions (`.github/workflows/tests.yml`) corre ruff y pytest en Windows y Linux con Python 3.10 y 3.13.
 Dependencias: `pyproject.toml` es la fuente; requirements*.txt las repiten para instalar rápido.
 Ejecutable: `packaging/MiniSQL.spec` (PyInstaller, un .exe sin consola). `.github/workflows/release.yml` lo compila,
-corre `MiniSQL.exe --self-test` (`minisql/selftest.py`) y lo publica en Releases al subir una etiqueta `vX.Y.Z` igual
-a la versión de pyproject.toml. Si se agrega una dependencia que se importa en tiempo de ejecución o desde código
+corre `MiniSQL.exe --self-test` (`minisql/selftest.py`) y lo publica en Releases (con `MiniSQL.exe.sha256`) al subir
+una etiqueta `vX.Y.Z` igual a `__version__` de `minisql/__init__.py`, única fuente de la versión. La app instalada
+se actualiza sola (`minisql/update.py` + `ui/updates.py`, ver docs/contexto/release.md). Si se agrega una dependencia que se importa en tiempo de ejecución o desde código
 compilado (como `cryptography` en el modo thin de oracledb), declararla en `hiddenimports` del .spec y cubrirla en selftest.
 
 ## Estructura y contexto
@@ -42,6 +43,8 @@ verificación mantiene corto el contexto principal.
   y DDL con cambios pendientes.
 - Usar bind variables (`:nombre`) en todas las consultas al diccionario; nunca concatenar nombres.
 - No guardar contraseñas en archivos.
+- Actualizaciones: solo HTTPS, nunca instalar sin verificar la huella SHA-256 publicada, nunca enviar datos de
+  la app en la consulta de versión, y aplicar la instalación solo por el cierre normal de la ventana.
 - Agregar o actualizar pruebas en `tests/` cuando cambie el comportamiento; `ruff check .` sin avisos.
 - Si cambia la interfaz, regenerar las capturas del README (`docs/generar_capturas.py`).
 - Una sola instancia (`app.single_instance_lock`, QLockFile en ~/.minisql/minisql.lock): dos SessionKeeper

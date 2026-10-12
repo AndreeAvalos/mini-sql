@@ -13,7 +13,7 @@ abre el código únicamente de los archivos que vayas a cambiar.
 | Código PL/SQL: compilar, errores, depuración (DBMS_DEBUG) | [depuracion.md](depuracion.md) | `depurador-plsql` |
 | Guardar el trabajo: hojas en disco, guardián de sesión, recuperación | [sesiones.md](sesiones.md) | `guardian-sesion` |
 | Pruebas, ruff, capturas del README | [pruebas.md](pruebas.md) | `verificador` |
-| Ejecutable, GitHub Actions, versiones y releases | [release.md](release.md) | `release` |
+| Ejecutable, GitHub Actions, versiones, releases y actualización automática | [release.md](release.md) | `release` |
 | Revisión de seguridad (DML peligroso, binds, credenciales) | [seguridad.md](seguridad.md) | `revisor-seguridad` |
 
 Mapa rápido de capas (una capa nunca importa de una superior):

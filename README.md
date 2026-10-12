@@ -54,6 +54,24 @@ Descarga `MiniSQL.exe` de la última versión en [Releases](https://github.com/A
 y ábrelo: no necesita Python ni Oracle Client. Al ser un ejecutable sin firma digital, Windows SmartScreen puede
 avisar la primera vez («Más información» → «Ejecutar de todas formas»).
 
+Guárdalo en una carpeta tuya, por ejemplo `%LOCALAPPDATA%\Programs\MiniSQL\`, para que pueda **actualizarse
+solo** (en `Program Files` no tiene permiso para reemplazarse).
+
+### Actualizaciones
+
+Al abrir, MiniSQL revisa una vez al día si hay una versión nueva en Releases y, si la hay, muestra un aviso arriba
+de las pestañas: **Novedades**, **Actualizar** u **Omitir esta versión**. Al actualizar:
+
+1. Descarga el `.exe` nuevo y verifica su huella **SHA-256** contra la publicada (si no coincide, no se instala).
+2. Corre la autoprueba del `.exe` nuevo (`--self-test`); si falla, no se instala.
+3. Reinicia por el cierre normal: si hay cambios sin confirmar o sin guardar te pregunta antes, y las hojas se
+   guardan y se recuperan al abrir. Si eliges «más tarde», se instala la próxima vez que cierres MiniSQL.
+
+La versión anterior queda como `MiniSQL.old.exe`: el menú **⋯** (junto a «+ Conexión») tiene «Volver a la versión
+anterior», además de «Buscar actualizaciones», «Buscar actualizaciones al abrir», «Incluir versiones de prueba» y
+«Acerca de». Sin internet, o si la red bloquea GitHub, no pasa nada: se puede descargar a mano. La revisión solo
+consulta la lista pública de versiones; no envía datos de la app ni de tus conexiones.
+
 ## Instalación desde el código
 
 Requiere Python 3.10 o superior.
@@ -113,7 +131,8 @@ Todo queda en tu carpeta de usuario, en `~/.minisql/`, y **nunca se guardan cont
 | Archivo | Contenido |
 |---|---|
 | `conexiones.json` | Perfiles (nombre, usuario, alias) |
-| `config.json` | Ruta del `tnsnames.ora` |
+| `config.json` | Ruta del `tnsnames.ora` y preferencias de actualización |
+| `actualizaciones/` | Descarga de una versión nueva mientras se instala (se borra sola) |
 | `sesion/indice.json` | Conexiones abiertas y orden de las hojas |
 | `sesion/<CONEXIÓN>/<hoja>.sql` | El texto de cada hoja (se escribe solo cuando cambia) |
 | `minisql.lock` | Evita abrir MiniSQL dos veces (dos ventanas se pisarían el autoguardado) |
@@ -129,11 +148,13 @@ python docs/generar_capturas.py   # vuelve a generar las imágenes de este READM
 
 ### Publicar una versión
 
-1. Sube el número en `version` de `pyproject.toml` (por ejemplo `0.2.0`) y haz commit.
+1. Sube `__version__` en `minisql/__init__.py` (por ejemplo `0.2.0`; una versión de prueba: `0.3.0-beta.1`) y
+   haz commit. Es el único lugar de la versión: pyproject.toml, el .exe y el actualizador la leen de ahí.
 2. Crea y sube la etiqueta: `git tag v0.2.0` y `git push origin v0.2.0`.
 
 GitHub Actions corre las pruebas, compila `MiniSQL.exe` con PyInstaller (`packaging/MiniSQL.spec`), lo verifica con
-`MiniSQL.exe --self-test` y lo publica en Releases. Para compilarlo localmente:
+`MiniSQL.exe --self-test` y lo publica en Releases junto con `MiniSQL.exe.sha256` (las etiquetas con `-`, como
+`v0.3.0-beta.1`, salen como versión de prueba). Las copias instaladas lo detectan solas. Para compilarlo localmente:
 `pip install pyinstaller` y `pyinstaller packaging/MiniSQL.spec`; queda en `dist/`.
 
 El código está organizado en capas: `minisql/sql` (texto SQL, sin Oracle ni Qt), `minisql/db` (todo lo que

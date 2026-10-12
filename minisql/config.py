@@ -16,6 +16,9 @@ SESSION_DIR = APP_DIR / "sesion"                # conexiones y hojas abiertas (s
 LEGACY_SESSION_FILE = APP_DIR / "sesion.json"   # formato anterior: se migra al abrir
 
 
+UPDATES_DIR = APP_DIR / "actualizaciones"       # descargas de versiones nuevas (se borran solas)
+
+
 AUTOSAVE_MS = 3000
 
 

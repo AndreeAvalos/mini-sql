@@ -41,5 +41,8 @@ def main():
     w = MainWindow()
     w.show()
     code = app.exec()
-    lock.unlock()
+    lock.unlock()                          # primero soltar el candado: la versión nueva lo necesita
+    if w.relaunch_exe:
+        from .update import relaunch
+        relaunch(w.relaunch_exe)
     sys.exit(code)

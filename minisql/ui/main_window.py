@@ -2,17 +2,20 @@
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QDialog, QMainWindow, QTabWidget, QToolButton
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QToolButton, QVBoxLayout, QWidget
 
 from .connect_dialog import ConnectDialog
 from .connection_tab import ConnectionTab
 from .session_keeper import SessionKeeper
+from .updates import UpdateManager
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, session_path=None, restore=True):
+    def __init__(self, session_path=None, restore=True, updates=None):
+        """updates: fábrica del UpdateManager, updates(ventana) (las pruebas usan una sin red ni config.json real)."""
         super().__init__()
         self.setWindowTitle("MiniSQL")
+        self.relaunch_exe = None          # .exe a abrir al terminar (después de instalar una actualización)
         self.resize(1200, 800)
 
         self.tabs = QTabWidget()
@@ -23,8 +26,28 @@ class MainWindow(QMainWindow):
         btn.setText("+ Conexión")
         btn.setToolTip("Nueva conexión (Ctrl+N)")
         btn.clicked.connect(self.new_connection)
-        self.tabs.setCornerWidget(btn, Qt.TopRightCorner)
-        self.setCentralWidget(self.tabs)
+        self.updates = (updates or UpdateManager)(self)
+        more = QToolButton()
+        more.setText("⋯")
+        more.setToolTip("Actualizaciones y acerca de MiniSQL")
+        more.setPopupMode(QToolButton.InstantPopup)
+        self.app_menu = QMenu(more)
+        self.app_menu.aboutToShow.connect(lambda: self.updates.build_menu(self.app_menu))
+        more.setMenu(self.app_menu)
+        corner = QWidget()
+        corner_row = QHBoxLayout(corner)
+        corner_row.setContentsMargins(0, 0, 0, 0)
+        corner_row.setSpacing(2)
+        corner_row.addWidget(btn)
+        corner_row.addWidget(more)
+        self.tabs.setCornerWidget(corner, Qt.TopRightCorner)
+        central = QWidget()
+        column = QVBoxLayout(central)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        column.addWidget(self.updates.banner)          # aviso de versión nueva (oculto si no hay)
+        column.addWidget(self.tabs, 1)
+        self.setCentralWidget(central)
 
         QShortcut(QKeySequence("Ctrl+N"), self).activated.connect(self.new_connection)
         QShortcut(QKeySequence("Ctrl+T"), self).activated.connect(self.new_sheet)
@@ -35,6 +58,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.restore_session)   # el guardián arranca al terminar de recuperar
         else:
             self.keeper.start()
+        self.updates.start()
 
     def conn_tabs(self):
         return [self.tabs.widget(i) for i in range(self.tabs.count())
@@ -126,4 +150,5 @@ class MainWindow(QMainWindow):
             self.tabs.removeTab(0)
         self.keeper.stop()
         self.keeper.save(full)
+        self.relaunch_exe = self.updates.on_exit()      # actualización pendiente: ya con todo guardado
         event.accept()

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QCompleter, QPlainTextEdit, QTextEdit, QToolTip, Q
 from ..sql.completion import completion_target, make_alias, table_refs, wants_alias
 from ..sql.text import inside_literal, q, statement_range, word_at
 from .highlighter import SqlHighlighter
-from .style import is_dark, mono_font
+from .style import font_zoom, is_dark, mono_font
 
 
 class SqlEditor(QPlainTextEdit):
@@ -35,9 +35,9 @@ class SqlEditor(QPlainTextEdit):
 
     def __init__(self, provider=None):
         super().__init__()
-        self.setFont(mono_font())
         self.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.setTabStopDistance(4 * self.fontMetrics().horizontalAdvance(" "))
+        self.apply_font_size(font_zoom.size)
+        font_zoom.changed.connect(self.apply_font_size)     # Ctrl+rueda en cualquier editor: todos iguales
         self.dark = is_dark(self)
         self.highlighter = SqlHighlighter(self.document(), self.dark)
         self.provider = provider
@@ -53,6 +53,14 @@ class SqlEditor(QPlainTextEdit):
         self.completer.activated[QModelIndex].connect(self.insert_completion)
         if provider is not None:
             provider.updated.connect(self._on_metadata)
+
+    def apply_font_size(self, size):
+        self.setFont(mono_font(size))
+        self.setTabStopDistance(4 * self.fontMetrics().horizontalAdvance(" "))
+
+    def wheelEvent(self, event):
+        if not font_zoom.wheel(event):              # Ctrl+rueda: zoom de toda la app, no solo de este editor
+            super().wheelEvent(event)
 
     # Orden de pintado: lo de más abajo queda encima (la búsqueda se ve sobre la línea del depurador)
     LAYER_ORDER = ("run", "exec", "find", "find_current")
@@ -168,6 +176,22 @@ class SqlEditor(QPlainTextEdit):
         self.waiting = None
 
 
+class MonoText(QPlainTextEdit):
+    """Texto monoespaciado (salida de DBMS_OUTPUT, SQL a confirmar) con el mismo zoom que los editores."""
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self.apply_font_size(font_zoom.size)
+        font_zoom.changed.connect(self.apply_font_size)
+
+    def apply_font_size(self, size):
+        self.setFont(mono_font(size))
+
+    def wheelEvent(self, event):
+        if not font_zoom.wheel(event):
+            super().wheelEvent(event)
+
+
 class GutterArea(QWidget):
     """Margen con números de línea y puntos de interrupción del CodeEditor."""
 
@@ -207,6 +231,13 @@ class CodeEditor(SqlEditor):
 
     def _update_margin(self, *_):
         self.setViewportMargins(self.gutter_width(), 0, 0, 0)
+
+    def apply_font_size(self, size):
+        super().apply_font_size(size)
+        if hasattr(self, "gutter"):                 # el margen de números cambia de ancho con la letra
+            self._update_margin()
+            cr = self.contentsRect()
+            self.gutter.setGeometry(QRect(cr.left(), cr.top(), self.gutter_width(), cr.height()))
 
     def _update_gutter(self, rect, dy):
         if dy:

@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QMenu, QTabWidg
 from .connect_dialog import ConnectDialog
 from .connection_tab import ConnectionTab
 from .session_keeper import SessionKeeper
+from .style import font_zoom
 from .updates import UpdateManager
 
 
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+N"), self).activated.connect(self.new_connection)
         QShortcut(QKeySequence("Ctrl+T"), self).activated.connect(self.new_sheet)
         QShortcut(QKeySequence("Ctrl+W"), self).activated.connect(self.close_current_sheet)
+        QShortcut(QKeySequence("Ctrl+0"), self).activated.connect(font_zoom.reset)   # letra normal (Ctrl+rueda)
 
         self.keeper = SessionKeeper(self, session_path)
         if restore:

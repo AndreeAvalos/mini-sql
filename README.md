@@ -111,6 +111,8 @@ el llavero del sistema (Administrador de credenciales de Windows, Keychain de ma
 | Ctrl+F / Ctrl+H | Buscar / reemplazar (mayúsculas, palabra completa, expresión regular) |
 | Doble clic / F2 en una celda | Editar el valor (vacío = NULL) |
 | Ctrl+S en los resultados | Guardar los cambios de la grilla (quedan pendientes de Commit) |
+| Ctrl+rueda del mouse | Agrandar o achicar la letra de editores, salidas y resultados (se recuerda) |
+| Ctrl+0 | Volver al tamaño de letra normal |
 | F3 / Shift+F3 | Siguiente / anterior resultado de la búsqueda |
 | F4 | Abrir el objeto cuyo nombre está bajo el cursor |
 | Ctrl+T / Ctrl+W | Nueva hoja / cerrar hoja |

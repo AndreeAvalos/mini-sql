@@ -30,11 +30,11 @@ from ..sql.text import (
     split_script,
     statement_range,
 )
-from .editors import SqlEditor
+from .editors import MonoText, SqlEditor
 from .find_bar import with_find_bar
 from .result_panel import ResultPanel
 from .results import ResultModel
-from .style import StatusLabel, mono_font
+from .style import StatusLabel
 from .workers import Emitter
 
 
@@ -72,9 +72,8 @@ class SheetWidget(QWidget):
         self.output_check = QCheckBox("DBMS_OUTPUT")
         self.output_check.setChecked(True)
         self.output_check.setToolTip("Mostrar lo que imprimen DBMS_OUTPUT.PUT_LINE los bloques y procedimientos")
-        self.output = QPlainTextEdit()
+        self.output = MonoText()
         self.output.setReadOnly(True)
-        self.output.setFont(mono_font())
         self.output.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.output.setPlaceholderText("Aquí aparece lo que imprime DBMS_OUTPUT.PUT_LINE")
         clear_out = QToolButton()

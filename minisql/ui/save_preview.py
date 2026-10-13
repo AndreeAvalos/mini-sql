@@ -9,8 +9,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from .editors import MonoText
 from .highlighter import SqlHighlighter
-from .style import WARN_COLOR, is_dark, mono_font
+from .style import WARN_COLOR, is_dark
 
 
 class SavePreviewDialog(QDialog):
@@ -32,10 +33,9 @@ class SavePreviewDialog(QDialog):
             warn.setStyleSheet(f"color: {WARN_COLOR}; font-weight: bold;")
             layout.addWidget(warn)
 
-        self.text = QPlainTextEdit("\n\n".join(statements))
+        self.text = MonoText("\n\n".join(statements))
         self.text.setReadOnly(True)
         self.text.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.text.setFont(mono_font())
         self.highlighter = SqlHighlighter(self.text.document(), dark=is_dark(self))
         layout.addWidget(self.text, 1)
 

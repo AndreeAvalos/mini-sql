@@ -6,12 +6,12 @@ import re
 from decimal import Decimal, InvalidOperation
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QKeySequence
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTableView
 
 from ..config import MAX_CELL_CHARS
 from ..db.grid import DATE_FORMATS, parse_value
-from .style import RESULT_THEME, result_stylesheet, result_theme
+from .style import RESULT_THEME, font_zoom, result_stylesheet, result_theme, ui_font
 
 
 def kind_of(value):
@@ -263,12 +263,26 @@ class ResultView(QTableView):
         header.setHighlightSections(False)
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         header.setMinimumHeight(28)
-        self.verticalHeader().setDefaultSectionSize(22)
+        self.base_font = QFont(self.font())
+        self.apply_font_size()
+        font_zoom.changed.connect(self.apply_font_size)
         # Al ajustar columnas, medir solo las primeras filas: medir 1000 filas traba la interfaz.
         header.setResizeContentsPrecision(100)
         self.verticalHeader().setResizeContentsPrecision(100)
         self._unsorted()
         self.setSortingEnabled(True)
+
+    def apply_font_size(self, _size=None):
+        """Misma letra que la app más el zoom (Ctrl+rueda); la altura de las filas la acompaña."""
+        font = ui_font(self.base_font)
+        self.setFont(font)
+        self.horizontalHeader().setFont(font)
+        self.verticalHeader().setFont(font)
+        self.verticalHeader().setDefaultSectionSize(max(22, QFontMetrics(font).height() + 8))
+
+    def wheelEvent(self, event):
+        if not font_zoom.wheel(event):
+            super().wheelEvent(event)
 
     def _unsorted(self):
         """Sin columna de orden: los resultados quedan en el orden de la consulta (su ORDER BY)."""

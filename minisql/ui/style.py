@@ -1,7 +1,9 @@
 """Apariencia compartida: fuente del editor, colores de estado y la etiqueta de estado."""
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QFont, QPalette
-from PySide6.QtWidgets import QLabel
+from PySide6.QtWidgets import QApplication, QLabel
+
+from ..config import load_settings, save_settings
 
 ERROR_COLOR = "#c0392b"
 OK_COLOR = "#27ae60"
@@ -9,9 +11,79 @@ WARN_COLOR = "#d35400"
 MUTED_COLOR = "gray"
 
 
-def mono_font(size=11):
-    font = QFont("Consolas", size)
+DEFAULT_FONT_SIZE = 11
+MIN_FONT_SIZE, MAX_FONT_SIZE = 7, 32
+
+
+class FontZoom(QObject):
+    """Tamaño de letra de editores, salidas y resultados: uno solo para toda la app. Ctrl+rueda lo cambia,
+    Ctrl+0 lo vuelve al normal y se recuerda en config.json ("font_size")."""
+    changed = Signal(int)
+
+    def __init__(self, load=load_settings, save=save_settings):
+        super().__init__()
+        self._load, self._save = load, save
+        self._size = None
+
+    @property
+    def size(self):
+        if self._size is None:
+            try:
+                size = int(self._load().get("font_size", DEFAULT_FONT_SIZE))
+            except (TypeError, ValueError, OSError):
+                size = DEFAULT_FONT_SIZE
+            self._size = min(MAX_FONT_SIZE, max(MIN_FONT_SIZE, size))
+        return self._size
+
+    @property
+    def offset(self):
+        """Puntos de más (o de menos) respecto del tamaño normal: para las fuentes que no son del editor."""
+        return self.size - DEFAULT_FONT_SIZE
+
+    def set_size(self, size):
+        size = min(MAX_FONT_SIZE, max(MIN_FONT_SIZE, int(size)))
+        if size == self.size:
+            return
+        self._size = size
+        try:
+            data = self._load()
+            data["font_size"] = size
+            self._save(data)
+        except OSError:
+            pass                                    # sin poder guardarlo, igual se aplica en esta sesión
+        self.changed.emit(size)
+
+    def step(self, delta):
+        self.set_size(self.size + delta)
+
+    def reset(self):
+        self.set_size(DEFAULT_FONT_SIZE)
+
+    def wheel(self, event):
+        """Para wheelEvent: con Ctrl, agranda o achica y devuelve True (el evento ya se usó)."""
+        if not event.modifiers() & Qt.ControlModifier:
+            return False
+        dy = event.angleDelta().y()
+        if dy:
+            self.step(1 if dy > 0 else -1)
+        event.accept()
+        return True
+
+
+font_zoom = FontZoom()
+
+
+def mono_font(size=None):
+    """Fuente de editores y salidas; sin size, la del zoom actual."""
+    font = QFont("Consolas", size or font_zoom.size)
     font.setStyleHint(QFont.Monospace)
+    return font
+
+
+def ui_font(base=None):
+    """La fuente normal de la app, con el mismo zoom (para la grilla de resultados)."""
+    font = QFont(base or QApplication.font())
+    font.setPointSizeF(max(MIN_FONT_SIZE - 2, font.pointSizeF() + font_zoom.offset))
     return font
 
 

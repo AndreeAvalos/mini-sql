@@ -35,6 +35,7 @@ falla con `ScriptError`; `on_error` llama `refresh_pending`). 5. `show_running_s
 
 ## Otros
 - `ConnectionTab.current_sheet()` siempre devuelve una SheetWidget (nunca un visor).
+- Zoom: `style.font_zoom` (FontZoom, uno para toda la app, config.json `font_size`); los widgets se suscriben a `font_zoom.changed` con un método propio (`apply_font_size`) y en `wheelEvent` llaman `font_zoom.wheel(e)` (SqlEditor/CodeEditor, `MonoText` para salidas, ResultView con `ui_font`). Ctrl+0 = `reset`. Las pruebas lo aíslan en memoria (conftest `isolated_font_zoom`).
 - `style.py`: `mono_font`, `is_dark`, `StatusLabel`, `RESULT_THEME` (claro/oscuro) y `result_stylesheet`.
 - `connect_dialog.py`: perfiles (`config.load_profiles`), contraseña en keyring (`KEYRING_SERVICE`),
   tnsnames. Las pruebas lo reemplazan con `monkeypatch.setattr(main_window, "ConnectDialog", ...)`.

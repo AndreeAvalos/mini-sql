@@ -173,6 +173,8 @@ class WorkspaceStore:
                     tabs.append(entry)
                 out.append(dict(conn, tabs=tabs))
             index[group] = out
+        if data.get("current"):
+            index["current"] = data["current"]          # nombre de la conexión activa al guardar
         return index, files
 
     def _remove_unused(self, files):

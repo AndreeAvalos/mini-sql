@@ -82,6 +82,7 @@ class MainWindow(QMainWindow):
                     self.keeper.park(state)
             else:
                 self.keeper.park(state)               # no se pierde: vuelve al conectarse a ese perfil
+        self.select_connection(self.keeper.saved.get("current"))   # la última usada, no la de más a la derecha
         self.keeper.paused = False
         self.keeper.save()
         self.keeper.start()
@@ -100,6 +101,14 @@ class MainWindow(QMainWindow):
             tab.restore(parked)
             self.statusBar().showMessage(f"Se recuperaron las hojas guardadas de {name}.", 10000)
         return tab
+
+    def select_connection(self, name):
+        """Elige la pestaña de la conexión con ese nombre (si está abierta)."""
+        for tab in self.conn_tabs():
+            if tab.name == name:
+                self.tabs.setCurrentWidget(tab)
+                return True
+        return False
 
     def current_conn(self):
         w = self.tabs.currentWidget()

@@ -151,6 +151,24 @@ def test_restore_session_on_startup(app, tmp_path, monkeypatch):
     w2.keeper.stop()
 
 
+def test_restore_selects_the_last_used_connection(app, tmp_path, monkeypatch):
+    path = tmp_path / "sesion"
+    conns = [{"name": n, "user": "u", "dsn": n, "tabs": [{"kind": "sheet", "title": "Hoja1", "text": n}]}
+             for n in ("QA", "DEV", "PROD")]
+    WorkspaceStore(path).save({"connections": conns, "parked": [], "current": "DEV"})
+    monkeypatch.setattr(main_window, "ConnectDialog", FakeDialog)
+    FakeDialog.accept = True
+    w = MainWindow(session_path=path, restore=False)
+    w.restore_session()
+    assert [w.tabs.tabText(i) for i in range(3)] == ["QA", "DEV", "PROD"]   # el orden se respeta…
+    assert w.current_conn().name == "DEV"                                  # …y queda elegida la última usada
+    w.tabs.setCurrentIndex(2)
+    assert w.keeper.snapshot()["current"] == "PROD"
+    w.keeper.save()
+    assert load_session(path)["current"] == "PROD"
+    w.keeper.stop()
+
+
 def test_close_window_saves_full_session(app, tmp_path):
     path = tmp_path / "sesion"
     w = MainWindow(session_path=path, restore=False)

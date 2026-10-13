@@ -92,7 +92,10 @@ def worth_keeping(state):
     tabs = [t for t in state.get("tabs", [])
             if (t.get("kind") == "sheet" and t.get("text", "").strip())
             or (t.get("kind") == "object" and t.get("code"))]
-    return dict(state, tabs=tabs, current=0) if tabs else None
+    if not tabs:
+        return None
+    state = {k: v for k, v in state.items() if k != "current"}      # la activa va marcada en su hoja ("active")
+    return dict(state, tabs=tabs)
 
 
 # ---------------------------------------------------------------- almacén

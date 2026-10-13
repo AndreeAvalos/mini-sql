@@ -10,6 +10,7 @@ Pruebas: `tests/test_session.py` (WorkspaceStore, guardián), `test_app.py`, `te
       DEV (guardadas)/…           hojas de una conexión cerrada, hasta reconectar
 - Escritura atómica (`write_text_atomic`, `write_json_atomic`: temporal + reemplazo).
 - `safe_name`/`unique_name`: nombres válidos en Windows (sin `<>:"/\|?*`, sin CON/PRN/COM1…).
+- Activa: la conexión en `indice.json` → `"current"` (nombre) y la hoja con `"active": true` en su entrada (no por posición: sobrevive a quitar hojas vacías y a reconectar). Formato viejo `"current": índice`, todavía se lee.
 - `worth_keeping(state)`: no guardar hojas vacías. `load_session()` migra el formato viejo `sesion.json`.
 
 ## Guardián (ui/session_keeper.py, `SessionKeeper`)

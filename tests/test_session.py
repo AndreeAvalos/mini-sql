@@ -8,7 +8,7 @@ from pathlib import Path
 from minisql.ui import main_window
 from minisql.ui.connection_tab import ConnectionTab
 from minisql.ui.main_window import MainWindow
-from minisql.workspace import WorkspaceStore, load_session, read_json, write_json_atomic
+from minisql.workspace import WorkspaceStore, load_session, read_json, worth_keeping, write_json_atomic
 
 from support import FakeConn, FakeDialog, SlowConn, make_session, start_slow_query, wait_until
 
@@ -90,7 +90,8 @@ def test_connection_snapshot_and_restore(app):
     code.selectAll()
     code.insertPlainText("CREATE OR REPLACE PROCEDURE PKG IS BEGIN NULL; END;")
     state = tab.snapshot()
-    assert state["name"] == "DEV" and state["dsn"] == "DEV_ALIAS" and state["current"] == 2
+    assert state["name"] == "DEV" and state["dsn"] == "DEV_ALIAS"
+    assert [bool(t.get("active")) for t in state["tabs"]] == [False, False, True]   # la activa, marcada
     assert [t.get("title") for t in state["tabs"]] == ["Ventas", "Hoja2", None]
     assert state["tabs"][2]["code"].startswith("CREATE OR REPLACE PROCEDURE")
 
@@ -104,6 +105,44 @@ def test_connection_snapshot_and_restore(app):
     assert wait_until(app, lambda: restored.pages["Código"].toPlainText().startswith("CREATE OR REPLACE PROCEDURE"))
     assert restored.has_unsaved() and "recuperados" in restored.status.text()
     assert other.add_sheet().windowTitle() == "" and other.sheets.tabText(3) == "Hoja3"
+
+
+def test_restore_selects_the_last_used_sheet(app):
+    tab = ConnectionTab(make_session(FakeConn()), "DEV", "DEV")
+    tab.current_sheet().editor.setPlainText("select 1 from dual")      # Hoja1
+    tab.add_sheet(text="")                                               # Hoja2 vacía (no se guarda)
+    tab.add_sheet(text="select 3 from dual")                             # Hoja3, la que se usa
+    tab.add_sheet(text="select 4 from dual")                             # Hoja4
+    tab.sheets.setCurrentIndex(2)
+    state = tab.snapshot()
+
+    other = ConnectionTab(make_session(FakeConn()), "DEV", "DEV")
+    other.restore(state)
+    assert other.sheets.tabText(other.sheets.currentIndex()) == "Hoja3"
+
+    parked = worth_keeping(state)                                        # conexión cerrada: sin la vacía
+    assert [t["title"] for t in parked["tabs"]] == ["Hoja1", "Hoja3", "Hoja4"]
+    again = ConnectionTab(make_session(FakeConn()), "DEV", "DEV")
+    again.restore(parked)
+    assert again.sheets.tabText(again.sheets.currentIndex()) == "Hoja3"  # antes volvía a la primera
+
+    legacy = ConnectionTab(make_session(FakeConn()), "DEV", "DEV")      # sesión guardada con el formato viejo
+    legacy.restore({"name": "DEV", "current": 1, "tabs": [{"kind": "sheet", "title": "A", "text": "x"},
+                                                          {"kind": "sheet", "title": "B", "text": "y"}]})
+    assert legacy.sheets.tabText(legacy.sheets.currentIndex()) == "B"
+
+
+def test_reconnecting_a_closed_connection_keeps_its_active_sheet(app, tmp_path):
+    w = MainWindow(session_path=tmp_path / "sesion", restore=False)
+    w.keeper.stop()
+    tab = w.add_connection(make_session(FakeConn()), "QA", "QA")
+    tab.current_sheet().editor.setPlainText("select 1 from dual")
+    tab.add_sheet(text="select 2 from dual")
+    tab.sheets.setCurrentIndex(1)
+    w.close_conn(w.tabs.indexOf(tab))                                     # sus hojas quedan guardadas
+    assert [bool(t.get("active")) for t in w.keeper.parked["QA"]["tabs"]] == [False, True]
+    back = w.add_connection(make_session(FakeConn()), "QA", "QA")         # al reconectarse, vuelven
+    assert back.sheets.tabText(back.sheets.currentIndex()) == "Hoja2"
 
 
 def test_keeper_autosaves_and_keeps_closed_connections(app, tmp_path):

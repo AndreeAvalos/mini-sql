@@ -285,13 +285,17 @@ class ConnectionTab(QWidget):
         for i in range(self.sheets.count()):
             w = self.sheets.widget(i)
             if isinstance(w, SheetWidget):
-                tabs.append({"kind": "sheet", "title": self.sheets.tabText(i),
-                             "text": w.editor.toPlainText(), "cursor": w.editor.textCursor().position()})
+                tab = {"kind": "sheet", "title": self.sheets.tabText(i),
+                       "text": w.editor.toPlainText(), "cursor": w.editor.textCursor().position()}
             elif isinstance(w, ObjectViewer):
-                tabs.append({"kind": "object", "owner": w.owner, "name": w.name, "type": w.otype,
-                             "code": w.unsaved_code()})
-        return {"name": self.name, "user": self.db.user, "dsn": self.dsn_label,
-                "current": self.sheets.currentIndex(), "tabs": tabs}
+                tab = {"kind": "object", "owner": w.owner, "name": w.name, "type": w.otype,
+                       "code": w.unsaved_code()}
+            else:
+                continue
+            if i == self.sheets.currentIndex():
+                tab["active"] = True                 # la hoja que se estaba usando: se vuelve a elegir al abrir
+            tabs.append(tab)
+        return {"name": self.name, "user": self.db.user, "dsn": self.dsn_label, "tabs": tabs}
 
     def restore(self, state):
         """Vuelve a abrir las hojas y objetos de un snapshot()."""
@@ -301,22 +305,24 @@ class ConnectionTab(QWidget):
         blank = [self.sheets.widget(i) for i in range(self.sheets.count())
                  if isinstance(self.sheets.widget(i), SheetWidget)
                  and not self.sheets.widget(i).editor.toPlainText().strip()]
-        first = self.sheets.count()
+        restored = []
         for t in tabs:
             if t.get("kind") == "sheet":
-                self._restore_sheet(t)
+                restored.append(self._restore_sheet(t))
             elif t.get("kind") == "object":
                 viewer = self.open_object(t["owner"], t["name"], t["type"])
                 if t.get("code"):
                     viewer.restore_code(t["code"])
+                restored.append(viewer)
         for w in blank:                          # la hoja vacía inicial ya no hace falta
             if self.sheets.count() > 1:
                 self.sheets.removeTab(self.sheets.indexOf(w))
                 w.deleteLater()
-                first -= 1
-        current = first + state.get("current", 0)
-        if 0 <= current < self.sheets.count():
-            self.sheets.setCurrentIndex(current)
+        active = next((i for i, t in enumerate(tabs) if t.get("active")), None)
+        if active is None and isinstance(state.get("current"), int):
+            active = state["current"]            # formato anterior: la posición de la hoja activa
+        if active is not None and 0 <= active < len(restored):
+            self.sheets.setCurrentWidget(restored[active])
 
     def _restore_sheet(self, t):
         text = t.get("text", "")
@@ -329,6 +335,7 @@ class ConnectionTab(QWidget):
         m = re.fullmatch(r"Hoja(\d+)", t.get("title") or "")
         if m:
             self.sheet_counter = max(self.sheet_counter, int(m.group(1)))
+        return sheet
 
     # --- cierre
     def _ask(self, title, text, yes_text, no_text):

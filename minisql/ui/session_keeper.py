@@ -50,8 +50,16 @@ class SessionKeeper(QObject):
             return
         old = self.parked.get(state["name"])
         if old:
-            seen = {json.dumps(t, sort_keys=True) for t in old["tabs"]}
-            state["tabs"] = old["tabs"] + [t for t in state["tabs"] if json.dumps(t, sort_keys=True) not in seen]
+            def key(tab):                        # misma hoja aunque cambie cuál está activa
+                return json.dumps({k: v for k, v in tab.items() if k != "active"}, sort_keys=True)
+            seen = {key(t) for t in old["tabs"]}
+            if any(t.get("active") for t in state["tabs"]):   # manda la activa de lo último que se cerró
+                old_tabs = [{k: v for k, v in t.items() if k != "active"} for t in old["tabs"]]
+                active = next(key(t) for t in state["tabs"] if t.get("active"))
+                old_tabs = [dict(t, active=True) if key(t) == active else t for t in old_tabs]
+            else:
+                old_tabs = old["tabs"]
+            state["tabs"] = old_tabs + [t for t in state["tabs"] if key(t) not in seen]
         self.parked[state["name"]] = state
         self.save()
 

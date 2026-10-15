@@ -34,7 +34,7 @@ from .editors import MonoText, SqlEditor
 from .find_bar import with_find_bar
 from .result_panel import ResultPanel
 from .results import ResultModel
-from .style import StatusLabel
+from .style import StatusLabel, variant
 from .workers import Emitter
 
 
@@ -53,10 +53,13 @@ class SheetWidget(QWidget):
             "(separa sentencias con una línea en blanco) o el texto seleccionado."
         )
 
-        self.run_btn = QPushButton("▶ Ejecutar  (Ctrl+Enter)")
-        self.cancel_btn = QPushButton("■ Cancelar")
+        self.run_btn = variant(QPushButton("▶  Ejecutar"), "primary")
+        self.run_btn.setToolTip("Ejecutar la sentencia donde está el cursor o el texto seleccionado  (Ctrl+Enter)")
+        self.cancel_btn = variant(QPushButton("■  Cancelar"), "ghost")
+        self.cancel_btn.setToolTip("Cancelar la ejecución en curso")
         self.cancel_btn.setEnabled(False)
-        self.format_btn = QPushButton("≡ Formatear  (Ctrl+Shift+F)")
+        self.format_btn = variant(QPushButton("≡  Formatear"), "ghost")
+        self.format_btn.setToolTip("Formatear la sentencia o la selección  (Ctrl+Shift+F)")
         self.status = StatusLabel("Listo")
 
         self.run_started = 0.0
@@ -78,6 +81,7 @@ class SheetWidget(QWidget):
         self.output.setPlaceholderText("Aquí aparece lo que imprime DBMS_OUTPUT.PUT_LINE")
         clear_out = QToolButton()
         clear_out.setText("Limpiar salida")
+        clear_out.setAutoRaise(True)
         clear_out.clicked.connect(self.clear_output)
         self.result_tabs = QTabWidget()
         self.result_tabs.setDocumentMode(True)
@@ -88,12 +92,15 @@ class SheetWidget(QWidget):
         self.last_output = 0
 
         bar = QHBoxLayout()
+        bar.setSpacing(6)
         bar.addWidget(self.run_btn)
         bar.addWidget(self.cancel_btn)
         bar.addWidget(self.format_btn)
+        bar.addSpacing(8)
         bar.addWidget(self.output_check)
         bar.addSpacing(12)
         bar.addWidget(self.status, 1)
+        self.status.setObjectName("muted")
 
         splitter = QSplitter(Qt.Vertical)
         editor_box = with_find_bar(self.editor)         # Ctrl+F buscar, Ctrl+H reemplazar
@@ -103,7 +110,8 @@ class SheetWidget(QWidget):
         splitter.setSizes([300, 400])
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(6, 8, 6, 4)
+        layout.setSpacing(6)
         layout.addLayout(bar)
         layout.addWidget(splitter, 1)
 

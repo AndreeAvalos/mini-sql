@@ -74,7 +74,7 @@ def test_results_arrive_in_query_order_and_sort_on_click(app):
 def test_header_is_styled(app):
     view = ResultView()
     style = view.styleSheet()
-    assert "QHeaderView::section:horizontal" in style and "font-weight: bold" in style
+    assert "QHeaderView::section:horizontal" in style and "font-weight: 600" in style
     assert view.theme["header_line"] in style
 
 

@@ -22,6 +22,7 @@ app = QApplication(sys.argv)
 from minisql.db.grid import preview_sql
 from minisql.ui.main_window import MainWindow
 from minisql.ui.save_preview import SavePreviewDialog
+from minisql.ui.theme import apply_theme
 
 import support
 from support import FakeConn, FakeCursor, FakeDebugSession, make_session, pump, wait_until
@@ -131,6 +132,7 @@ def save(widget, name, popup=None):
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
+    apply_theme(app, "dark")                         # como se ve la app (las capturas, siempre en oscuro)
 
     # 1. Hoja con resultados
     w, tab = window()

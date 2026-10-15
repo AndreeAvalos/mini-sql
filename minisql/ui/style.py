@@ -75,7 +75,9 @@ font_zoom = FontZoom()
 
 def mono_font(size=None):
     """Fuente de editores y salidas; sin size, la del zoom actual."""
-    font = QFont("Consolas", size or font_zoom.size)
+    from .theme import mono_family
+
+    font = QFont(mono_family(), size or font_zoom.size)
     font.setStyleHint(QFont.Monospace)
     return font
 
@@ -85,6 +87,43 @@ def ui_font(base=None):
     font = QFont(base or QApplication.font())
     font.setPointSizeF(max(MIN_FONT_SIZE - 2, font.pointSizeF() + font_zoom.offset))
     return font
+
+
+def card(widget, margins=6):
+    """Envuelve widget en una "tarjeta": fondo propio, borde suave y esquinas redondeadas (ver theme.py)."""
+    from PySide6.QtWidgets import QFrame, QVBoxLayout
+
+    frame = QFrame()
+    frame.setObjectName("card")
+    box = QVBoxLayout(frame)
+    box.setContentsMargins(margins, margins, margins, margins)
+    box.setSpacing(0)
+    box.addWidget(widget)
+    frame.setVisible(not widget.isHidden())
+    frame.follower = _FollowVisibility(frame, widget)     # si el contenido se oculta, la tarjeta también
+    return frame
+
+
+class _FollowVisibility(QObject):
+    def __init__(self, frame, widget):
+        super().__init__(frame)
+        self.frame = frame
+        widget.installEventFilter(self)
+
+    def eventFilter(self, _obj, event):
+        from PySide6.QtCore import QEvent
+
+        if event.type() == QEvent.HideToParent:
+            self.frame.hide()
+        elif event.type() == QEvent.ShowToParent:
+            self.frame.show()
+        return False
+
+
+def variant(button, name):
+    """Estilo del botón: "primary" (acción principal), "ghost" (discreto), "success", "danger"."""
+    button.setProperty("variant", name)
+    return button
 
 
 def is_dark(widget):
@@ -113,20 +152,20 @@ class StatusLabel(QLabel):
 # Colores de la tabla por tema: encabezado destacado y un color por tipo de dato
 RESULT_THEME = {
     "dark": {
-        "header_bg": "#2b3a4d", "header_fg": "#e6edf5", "header_line": "#4a90d9", "header_sep": "#3b4b60",
-        "rownum_bg": "#252526", "rownum_fg": "#7f7f7f",
-        "base": "#1e1e1e", "alt": "#272a2f", "grid": "#363636",
-        "selection": "#264f78", "selection_fg": "#ffffff",
-        "number": "#9cdcfe", "date": "#e5c07b", "null": "#7f7f7f", "binary": "#c586c0",
-        "modified": "#5c4a12", "new": "#1e4a2c", "deleted": "#5a1f1f",     # edición de la grilla
+        "header_bg": "#242831", "header_fg": "#c9cfdb", "header_line": "#3a404d", "header_sep": "#2c313c",
+        "rownum_bg": "#1c1f26", "rownum_fg": "#5d6577",
+        "base": "#1c1f26", "alt": "#20242c", "grid": "#2a2f39",
+        "selection": "#2b4372", "selection_fg": "#ffffff",
+        "number": "#7cc4ff", "date": "#e3b45b", "null": "#5d6577", "binary": "#c792ea",
+        "modified": "#4d3f14", "new": "#183d2a", "deleted": "#4d1d22",     # edición de la grilla
     },
     "light": {
-        "header_bg": "#e7eef7", "header_fg": "#1b2a3a", "header_line": "#3b7dd8", "header_sep": "#cbd6e3",
-        "rownum_bg": "#f3f3f3", "rownum_fg": "#8a8a8a",
-        "base": "#ffffff", "alt": "#f5f8fc", "grid": "#e1e4e8",
-        "selection": "#cce4ff", "selection_fg": "#000000",
-        "number": "#0451a5", "date": "#8a5a00", "null": "#9a9a9a", "binary": "#a626a4",
-        "modified": "#fff1b8", "new": "#d9f7e3", "deleted": "#fbd5d5",     # edición de la grilla
+        "header_bg": "#f5f6f8", "header_fg": "#3b4250", "header_line": "#c9ced8", "header_sep": "#dde1e8",
+        "rownum_bg": "#fafbfc", "rownum_fg": "#9aa1ad",
+        "base": "#ffffff", "alt": "#f8f9fb", "grid": "#eceef2",
+        "selection": "#d4e2ff", "selection_fg": "#000000",
+        "number": "#0b5cad", "date": "#8a5a00", "null": "#9aa1ad", "binary": "#a626a4",
+        "modified": "#fff1b8", "new": "#dcf5e3", "deleted": "#fbd9d9",     # edición de la grilla
     },
 }
 
@@ -139,18 +178,20 @@ def result_stylesheet(t):
     return f"""
         QTableView {{
             background-color: {t['base']}; alternate-background-color: {t['alt']};
-            gridline-color: {t['grid']};
+            gridline-color: {t['grid']}; border: none;
             selection-background-color: {t['selection']}; selection-color: {t['selection_fg']};
         }}
+        QHeaderView {{ background-color: {t['header_bg']}; }}
         QHeaderView::section:horizontal {{
-            background-color: {t['header_bg']}; color: {t['header_fg']}; font-weight: bold;
-            padding: 4px 8px; border: none;
-            border-right: 1px solid {t['header_sep']}; border-bottom: 2px solid {t['header_line']};
+            background-color: {t['header_bg']}; color: {t['header_fg']}; font-weight: 600;
+            padding: 6px 10px; border: none;
+            border-right: 1px solid {t['header_sep']}; border-bottom: 1px solid {t['header_line']};
         }}
+        QHeaderView::section:horizontal:hover {{ color: {t['selection_fg']}; }}
         QHeaderView::section:vertical {{
             background-color: {t['rownum_bg']}; color: {t['rownum_fg']};
-            padding: 0 6px; border: none; border-right: 1px solid {t['grid']}; border-bottom: 1px solid {t['grid']};
+            padding: 0 8px; border: none; border-right: 1px solid {t['grid']};
         }}
         QTableCornerButton::section {{
-            background-color: {t['header_bg']}; border: none; border-bottom: 2px solid {t['header_line']};
+            background-color: {t['header_bg']}; border: none; border-bottom: 1px solid {t['header_line']};
         }}"""

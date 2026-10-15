@@ -34,6 +34,8 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("MiniSQL")
+    from .ui.theme import apply_theme
+    apply_theme(app)                       # oscuro o claro según config.json / Windows
     lock = single_instance_lock()
     if lock is None:
         QMessageBox.information(None, "MiniSQL", ALREADY_OPEN)

@@ -32,6 +32,8 @@ explorador de objetos, autocompletado, edición y compilación de paquetes, y de
   pendientes.
 - **Autocompletado** de palabras clave, funciones, esquemas, tablas, columnas, paquetes y secuencias. Entiende los
   alias del `FROM`/`JOIN`, sigue sinónimos y agrega el alias al completar una tabla o una columna.
+- **Interfaz moderna** con tema oscuro y claro (sigue el modo de Windows o se elige en el menú ⋯ → Tema), íconos
+  por tipo de objeto y la letra que prefieras con Ctrl+rueda.
 - **Colores de sintaxis** y **formateo** de SQL (Ctrl+Shift+F).
 - **Buscar y reemplazar** (Ctrl+F / Ctrl+H) en hojas, código y DDL, con expresiones regulares.
 - **DBMS_OUTPUT** en cada hoja; acepta `SET SERVEROUTPUT ON` y `EXEC procedimiento` como en SQL*Plus.

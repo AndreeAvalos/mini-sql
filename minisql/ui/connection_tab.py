@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -29,7 +30,7 @@ from .debugger import PlsqlDebugger
 from .explorer import ObjectExplorer
 from .object_viewer import ObjectViewer
 from .sheet import SheetWidget
-from .style import ERROR_COLOR, MUTED_COLOR, OK_COLOR, WARN_COLOR
+from .style import ERROR_COLOR, MUTED_COLOR, OK_COLOR, WARN_COLOR, card, variant
 from .workers import TaskRunner
 
 DEBUG_KEYS = (("F5", "continue"), ("F10", "over"), ("F11", "into"), ("Shift+F11", "out"), ("Shift+F5", "stop"))
@@ -64,6 +65,7 @@ class ConnectionTab(QWidget):
         self.sheets.tabCloseRequested.connect(self.close_sheet)
         self.sheets.tabBarDoubleClicked.connect(self.rename_sheet)
         plus = QToolButton()
+        plus.setAutoRaise(True)
         plus.setText("+ Hoja")
         plus.setToolTip("Nueva hoja (Ctrl+T)")
         plus.clicked.connect(lambda: self.add_sheet())
@@ -79,31 +81,35 @@ class ConnectionTab(QWidget):
             sc.activated.connect(lambda k=key: self.debugger.active and self.debug_panel.do(k))
 
         right = QSplitter(Qt.Vertical)
-        right.addWidget(self.sheets)
-        right.addWidget(self.debug_panel)
+        right.addWidget(card(self.sheets, 4))
+        self.debug_card = card(self.debug_panel)
+        right.addWidget(self.debug_card)
         right.setStretchFactor(0, 1)
         right.setSizes([500, 220])
         splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self.explorer)
+        splitter.addWidget(card(self.explorer))
         splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([300, 900])
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.addLayout(self._transaction_bar())
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(8)
+        layout.addWidget(self._transaction_bar())
         layout.addWidget(splitter, 1)
         self.add_sheet()
 
     def _transaction_bar(self):
-        commit_btn = self.commit_btn = QPushButton("✔ Commit")
-        rollback_btn = self.rollback_btn = QPushButton("↶ Rollback")
+        commit_btn = self.commit_btn = variant(QPushButton("✔  Commit"), "success")
+        rollback_btn = self.rollback_btn = QPushButton("↶  Rollback")
+        commit_btn.setToolTip("Confirmar los cambios de esta conexión")
+        rollback_btn.setToolTip("Deshacer los cambios sin confirmar de esta conexión")
         commit_btn.clicked.connect(self.commit)
         rollback_btn.clicked.connect(self.rollback)
-        self.disconnect_btn = QPushButton("⏏ Desconectar")
+        self.disconnect_btn = variant(QPushButton("Desconectar"), "ghost")
         self.disconnect_btn.setToolTip("Cierra la sesión de Oracle; las hojas quedan abiertas")
         self.disconnect_btn.clicked.connect(self.disconnect)
-        self.reconnect_btn = QPushButton("⟳ Reconectar")
+        self.reconnect_btn = variant(QPushButton("⟳  Reconectar"), "ghost")
         self.reconnect_btn.setToolTip("Abre una sesión nueva de Oracle con el mismo usuario (sin pedir la contraseña)")
         self.reconnect_btn.clicked.connect(lambda: self.reconnect())
         self.conn_state = QLabel("")
@@ -111,20 +117,35 @@ class ConnectionTab(QWidget):
         self.pending_label = QLabel("")
         self.pending_label.setStyleSheet(f"color: {WARN_COLOR}; font-weight: bold;")
         conn = self.db.conn
-        info = QLabel(f"{conn.username}@{self.dsn_label}   (Oracle {conn.version})")
-        info.setStyleSheet(f"color: {MUTED_COLOR};")
-        bar = QHBoxLayout()
-        bar.addWidget(commit_btn)
-        bar.addWidget(rollback_btn)
-        bar.addSpacing(12)
-        bar.addWidget(self.disconnect_btn)
-        bar.addWidget(self.reconnect_btn)
-        bar.addSpacing(12)
+        # quién y dónde: punto de estado (verde conectado, rojo sin conexión), nombre y usuario@base
+        self.status_dot = QLabel("●")
+        title = QLabel(self.name)
+        title.setStyleSheet("font-weight: 600; font-size: 11pt;")
+        info = QLabel(f"{conn.username}@{self.dsn_label}  ·  Oracle {conn.version}")
+        info.setObjectName("muted")
+        header = QFrame()
+        header.setObjectName("header")
+        bar = QHBoxLayout(header)
+        bar.setContentsMargins(12, 6, 8, 6)
+        bar.setSpacing(6)
+        bar.addWidget(self.status_dot)
+        bar.addWidget(title)
+        bar.addWidget(info)
+        bar.addSpacing(10)
         bar.addWidget(self.conn_state)
         bar.addWidget(self.pending_label)
         bar.addStretch()
-        bar.addWidget(info)
-        return bar
+        bar.addWidget(commit_btn)
+        bar.addWidget(rollback_btn)
+        bar.addSpacing(10)
+        bar.addWidget(self.disconnect_btn)
+        bar.addWidget(self.reconnect_btn)
+        self._paint_dot(True)
+        return header
+
+    def _paint_dot(self, connected):
+        self.status_dot.setStyleSheet(f"color: {OK_COLOR if connected else ERROR_COLOR}; font-size: 12pt;")
+        self.status_dot.setToolTip("Conectada" if connected else "Sin conexión")
 
     # --- hojas
     def add_sheet(self, title=None, text=""):
@@ -513,6 +534,7 @@ class ConnectionTab(QWidget):
                             "Tus hojas siguen aquí. Usa ⟳ Reconectar para seguir trabajando.")
 
     def _set_connected(self, connected, why=""):
+        self._paint_dot(connected)
         if connected:
             self.conn_state.setText("")
             self.conn_state.setToolTip("")

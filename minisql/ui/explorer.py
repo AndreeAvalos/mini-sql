@@ -1,6 +1,6 @@
 """Árbol de esquemas y objetos."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -27,6 +27,7 @@ from ..db.catalog import (
 from ..db.source import fetch_ddl
 from ..sql.text import q
 from .style import ERROR_COLOR, MUTED_COLOR
+from .theme import badge_icon, tokens
 
 CATEGORIES = [
     ("Tablas", "TABLE"),
@@ -56,16 +57,19 @@ class ObjectExplorer(QWidget):
         self.me = conn_tab.db.schema
 
         self.filter = QLineEdit()
-        self.filter.setPlaceholderText("Filtrar objetos por nombre…")
+        self.filter.setPlaceholderText("Buscar objetos…")
         self.filter.setClearButtonEnabled(True)
         self.hide_sys = QCheckBox("Ocultar esquemas de Oracle")
         self.hide_sys.setChecked(True)
         refresh = QToolButton()
+        refresh.setAutoRaise(True)
         refresh.setText("⟳")
         refresh.setToolTip("Recargar esquemas")
 
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
+        self.tree.setIndentation(14)
+        self.tree.setIconSize(QSize(16, 16))
         self.tree.setUniformRowHeights(True)
         self.tree.setExpandsOnDoubleClick(False)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -74,7 +78,8 @@ class ObjectExplorer(QWidget):
         top.addWidget(self.hide_sys, 1)
         top.addWidget(refresh)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(6)
         layout.addWidget(self.filter)
         layout.addLayout(top)
         layout.addWidget(self.tree)
@@ -100,6 +105,10 @@ class ObjectExplorer(QWidget):
     def add_item(self, parent, text, info, expandable=False):
         it = QTreeWidgetItem([text])
         self.set_info(it, info)
+        kind = info.get("kind")
+        icon = badge_icon(info.get("type") if kind in ("category", "object") else kind)
+        if icon is not None:
+            it.setIcon(0, icon)
         if expandable:
             it.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
         if parent is None:
@@ -209,7 +218,8 @@ class ObjectExplorer(QWidget):
                 if nullable == "N":
                     text += "  NOT NULL"
                 it = self.add_item(item, text, {"kind": "column", "owner": owner, "name": col})
-                it.setForeground(0, QColor("#555555") if not pk else QColor("#8e6c00"))
+                colors = tokens()
+                it.setForeground(0, QColor(colors["warn"] if pk else colors["muted"]))
 
         self.tab.meta_call(lambda cur: list_columns(cur, owner, name), ok,
                            lambda m: self.show_child_error(item, m))

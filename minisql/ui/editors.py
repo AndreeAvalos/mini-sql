@@ -20,6 +20,7 @@ from ..sql.completion import completion_target, make_alias, table_refs, wants_al
 from ..sql.text import inside_literal, q, statement_range, word_at
 from .highlighter import SqlHighlighter
 from .style import font_zoom, is_dark, mono_font
+from .theme import THEMES
 
 
 class SqlEditor(QPlainTextEdit):
@@ -252,7 +253,8 @@ class CodeEditor(SqlEditor):
 
     def paint_gutter(self, event):
         painter = QPainter(self.gutter)
-        painter.fillRect(event.rect(), QColor("#252526" if self.dark else "#f3f3f3"))
+        colors = THEMES["dark" if self.dark else "light"]
+        painter.fillRect(event.rect(), self.palette().base().color())     # el margen, del mismo fondo
         block = self.firstVisibleBlock()
         top = round(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
         h = self.fontMetrics().height()
@@ -262,14 +264,14 @@ class CodeEditor(SqlEditor):
                 line = block.blockNumber() + 1
                 if line in self.breakpoints:
                     painter.setPen(Qt.NoPen)
-                    painter.setBrush(QColor("#e51400"))
+                    painter.setBrush(QColor(colors["danger"]))
                     painter.drawEllipse(4, top + (h - 10) // 2, 10, 10)
                 if line == self.exec_line:
                     painter.setPen(Qt.NoPen)
-                    painter.setBrush(QColor("#ffcc00"))
+                    painter.setBrush(QColor(colors["warn"]))
                     y = top + h // 2
                     painter.drawPolygon(QPolygon([QPoint(3, y - 5), QPoint(13, y), QPoint(3, y + 5)]))
-                painter.setPen(QColor("#858585"))
+                painter.setPen(QColor(colors["text"] if line == self.exec_line else colors["faint"]))
                 painter.drawText(0, top, self.gutter.width() - 4, h, Qt.AlignRight | Qt.AlignVCenter, str(line))
             block = block.next()
             top = bottom
@@ -319,7 +321,7 @@ class CodeEditor(SqlEditor):
         if line:
             block = self.document().findBlockByNumber(line - 1)
             sel = QTextEdit.ExtraSelection()
-            sel.format.setBackground(QColor("#4b4700" if self.dark else "#fff3a0"))
+            sel.format.setBackground(QColor("#3d3420" if self.dark else "#fff3c4"))   # línea en pausa
             sel.format.setProperty(QTextFormat.FullWidthSelection, True)
             sel.cursor = QTextCursor(block)
             sels.append(sel)

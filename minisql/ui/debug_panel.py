@@ -47,6 +47,7 @@ class DebugPanel(QWidget):
         bar.addSpacing(12)
         bar.addWidget(self.location, 1)
         close = QToolButton()
+        close.setAutoRaise(True)
         close.setText("✕")
         close.setToolTip("Ocultar panel")
         close.clicked.connect(self.hide)

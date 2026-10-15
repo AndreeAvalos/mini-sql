@@ -6,14 +6,14 @@ from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
 
 from ..sql.text import SQL_FUNCTIONS, SQL_KEYWORDS, string_end
 
-# Colores (oscuro, claro): estilo VS Code
+# Colores (oscuro, claro): suaves y con buen contraste sobre el fondo del tema (ver theme.py)
 SQL_COLORS = {
-    "keyword": ("#569CD6", "#0000FF"),
-    "function": ("#DCDCAA", "#795E26"),
-    "string": ("#CE9178", "#A31515"),
-    "number": ("#B5CEA8", "#098658"),
-    "comment": ("#6A9955", "#008000"),
-    "bind": ("#9CDCFE", "#001080"),
+    "keyword": ("#7aa2ff", "#2f5bd3"),
+    "function": ("#e0b86b", "#8a5a00"),
+    "string": ("#9ece6a", "#2a7a3b"),
+    "number": ("#ff9e64", "#b4551f"),
+    "comment": ("#6b7489", "#8a93a5"),
+    "bind": ("#7dcfff", "#0b7285"),
 }
 
 

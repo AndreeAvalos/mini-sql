@@ -2,8 +2,19 @@
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QTabWidget,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
+from ..config import load_settings, save_settings
 from .connect_dialog import ConnectDialog
 from .connection_tab import ConnectionTab
 from .session_keeper import SessionKeeper
@@ -20,20 +31,23 @@ class MainWindow(QMainWindow):
         self.resize(1200, 800)
 
         self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
         self.tabs.setTabsClosable(True)
         self.tabs.setMovable(True)
         self.tabs.tabCloseRequested.connect(self.close_conn)
         btn = QToolButton()
+        btn.setAutoRaise(True)
         btn.setText("+ Conexión")
         btn.setToolTip("Nueva conexión (Ctrl+N)")
         btn.clicked.connect(self.new_connection)
         self.updates = (updates or UpdateManager)(self)
         more = QToolButton()
+        more.setAutoRaise(True)
         more.setText("⋯")
         more.setToolTip("Actualizaciones y acerca de MiniSQL")
         more.setPopupMode(QToolButton.InstantPopup)
         self.app_menu = QMenu(more)
-        self.app_menu.aboutToShow.connect(lambda: self.updates.build_menu(self.app_menu))
+        self.app_menu.aboutToShow.connect(self._build_app_menu)
         more.setMenu(self.app_menu)
         corner = QWidget()
         corner_row = QHBoxLayout(corner)
@@ -61,6 +75,30 @@ class MainWindow(QMainWindow):
         else:
             self.keeper.start()
         self.updates.start()
+
+    THEME_CHOICES = (("system", "Como Windows"), ("dark", "Oscuro"), ("light", "Claro"))
+
+    def _build_app_menu(self):
+        """Menú ⋯: tema y, abajo, actualizaciones y acerca de (los arma UpdateManager)."""
+        self.updates.build_menu(self.app_menu)
+        themes = QMenu("Tema", self.app_menu)
+        current = load_settings().get("theme", "system")
+        for key, label in self.THEME_CHOICES:
+            action = themes.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(key == current)
+            action.triggered.connect(lambda _checked=False, k=key: self.set_theme(k))
+        first = self.app_menu.actions()[0]
+        self.app_menu.insertMenu(first, themes)
+        self.app_menu.insertSeparator(first)
+
+    def set_theme(self, key):
+        data = load_settings()
+        if data.get("theme", "system") == key:
+            return
+        data["theme"] = key
+        save_settings(data)
+        QMessageBox.information(self, "Tema", "El tema nuevo se aplica al volver a abrir MiniSQL.")
 
     def conn_tabs(self):
         return [self.tabs.widget(i) for i in range(self.tabs.count())

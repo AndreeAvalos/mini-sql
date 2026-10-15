@@ -189,6 +189,14 @@ class SheetWidget(QWidget):
     def run(self):
         if self.running:
             return
+        if not self.conn_tab.connected:
+            if self.conn_tab.reconnecting:
+                return
+            r = QMessageBox.question(self, "Sin conexión",
+                                     f"La conexión {self.conn_tab.name} está cerrada.\n\n¿Reconectar y ejecutar?")
+            if r == QMessageBox.Yes:
+                self.conn_tab.reconnect(then=self.run)
+            return
         cur = self.editor.textCursor()
         if cur.hasSelection():
             start, end = cur.selectionStart(), cur.selectionEnd()

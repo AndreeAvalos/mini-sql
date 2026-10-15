@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..db.catalog import kind_label, resolve_object
-from ..db.session import SessionBusy
+from ..db.session import SessionBusy, connection_lost
 from ..sql.text import DDL, DML
 from .completion import CompletionProvider
 from .debug_panel import DebugController, DebugPanel
@@ -29,7 +29,7 @@ from .debugger import PlsqlDebugger
 from .explorer import ObjectExplorer
 from .object_viewer import ObjectViewer
 from .sheet import SheetWidget
-from .style import MUTED_COLOR, WARN_COLOR
+from .style import ERROR_COLOR, MUTED_COLOR, OK_COLOR, WARN_COLOR
 from .workers import TaskRunner
 
 DEBUG_KEYS = (("F5", "continue"), ("F10", "over"), ("F11", "into"), ("Shift+F11", "out"), ("Shift+F5", "stop"))
@@ -40,6 +40,8 @@ class ConnectionTab(QWidget):
     transacción pendiente y el cierre. Lo que habla con Oracle está en `db` (OracleSession)."""
     pending_changed = Signal()
     transaction_ended = Signal(str)   # "Commit" o "Rollback": lo pendiente ya no está pendiente
+    connection_changed = Signal(bool) # se desconectó, se perdió o se volvió a conectar
+    _lost = Signal(str)               # desde un hilo: Oracle respondió que la conexión ya no existe
     CLOSE_WAIT_S = 10       # cuánto esperar a que Oracle atienda la cancelación al cerrar
 
     def __init__(self, db, name, dsn_label=None):
@@ -48,7 +50,9 @@ class ConnectionTab(QWidget):
         self.name = name
         self.dsn_label = dsn_label or getattr(db.conn, "dsn", "")
         self.pending = False
+        self.reconnecting = False
         self.sheet_counter = 0
+        self._lost.connect(self._on_lost)
         self.runner = TaskRunner(self)
         self.completion = CompletionProvider(self.meta_call, db.schema, self)
         self.debugger = PlsqlDebugger(db, self)
@@ -92,10 +96,18 @@ class ConnectionTab(QWidget):
         self.add_sheet()
 
     def _transaction_bar(self):
-        commit_btn = QPushButton("✔ Commit")
-        rollback_btn = QPushButton("↶ Rollback")
+        commit_btn = self.commit_btn = QPushButton("✔ Commit")
+        rollback_btn = self.rollback_btn = QPushButton("↶ Rollback")
         commit_btn.clicked.connect(self.commit)
         rollback_btn.clicked.connect(self.rollback)
+        self.disconnect_btn = QPushButton("⏏ Desconectar")
+        self.disconnect_btn.setToolTip("Cierra la sesión de Oracle; las hojas quedan abiertas")
+        self.disconnect_btn.clicked.connect(self.disconnect)
+        self.reconnect_btn = QPushButton("⟳ Reconectar")
+        self.reconnect_btn.setToolTip("Abre una sesión nueva de Oracle con el mismo usuario (sin pedir la contraseña)")
+        self.reconnect_btn.clicked.connect(lambda: self.reconnect())
+        self.conn_state = QLabel("")
+        self.conn_state.setStyleSheet(f"color: {ERROR_COLOR}; font-weight: bold;")
         self.pending_label = QLabel("")
         self.pending_label.setStyleSheet(f"color: {WARN_COLOR}; font-weight: bold;")
         conn = self.db.conn
@@ -105,6 +117,10 @@ class ConnectionTab(QWidget):
         bar.addWidget(commit_btn)
         bar.addWidget(rollback_btn)
         bar.addSpacing(12)
+        bar.addWidget(self.disconnect_btn)
+        bar.addWidget(self.reconnect_btn)
+        bar.addSpacing(12)
+        bar.addWidget(self.conn_state)
         bar.addWidget(self.pending_label)
         bar.addStretch()
         bar.addWidget(info)
@@ -208,7 +224,7 @@ class ConnectionTab(QWidget):
     # --- trabajo en hilos
     def meta_call(self, fn, on_ok, on_err):
         """Ejecuta fn(cursor) en la sesión de metadatos, en un hilo; el resultado vuelve a la interfaz."""
-        self.runner.run(lambda: self.db.with_meta_cursor(fn), on_ok, on_err)
+        self.runner.run(self._watch(lambda: self.db.with_meta_cursor(fn)), on_ok, on_err)
 
     def run_statement(self, sql, emitter, with_rowid=False):
         """Ejecuta sql en la sesión principal, en un hilo. Avisa por emitter: output, done o failed.
@@ -220,8 +236,21 @@ class ConnectionTab(QWidget):
         """Ejecuta varias sentencias en orden en la sesión principal, en un hilo (ver OracleSession.execute_script)."""
         self._run_in_thread(lambda: self.db.execute_script(statements, emitter.output.emit), emitter)
 
-    @staticmethod
-    def _run_in_thread(fn, emitter):
+    def _watch(self, fn):
+        """Envuelve fn (corre en un hilo): si Oracle dice que la conexión ya no existe, avisa a la interfaz."""
+        def run():
+            try:
+                return fn()
+            except Exception as e:
+                if connection_lost(e) and self.db.connected:
+                    self.db.connected = False
+                    self._lost.emit(str(e).splitlines()[0])
+                raise
+        return run
+
+    def _run_in_thread(self, fn, emitter):
+        fn = self._watch(fn)
+
         def work():
             try:
                 res = fn()
@@ -232,6 +261,9 @@ class ConnectionTab(QWidget):
         threading.Thread(target=work, daemon=True).start()
 
     def start_debug(self, block, compile_targets=(), target=None):
+        if not self.connected:
+            QMessageBox.information(self, "Sin conexión", f"{self.name} está desconectada: usa ⟳ Reconectar.")
+            return
         self.debug.start(block, compile_targets, target)
 
     # --- transacción
@@ -369,26 +401,33 @@ class ConnectionTab(QWidget):
     def close_connection(self):
         """Devuelve True si se pudo cerrar. Si hay algo corriendo, ofrece cancelarlo; si hay cambios
         sin confirmar, pregunta Commit o Rollback."""
-        unsaved = [self.sheets.tabText(i) for i in range(self.sheets.count())
-                   if hasattr(self.sheets.widget(i), "results") and self.sheets.widget(i).results.has_unsaved_changes()]
-        if unsaved and not self._confirm(
-                "Cambios sin guardar", f"{self.name}: hay cambios sin guardar en los resultados de "
-                f"{', '.join(unsaved)}. ¿Cerrar y descartarlos?"):
-            return False
-        if self.debugger.active or self.db.busy:
-            closed = self._cancel_running_work()
-            if closed is not None:
-                return closed
-        if self.pending and not self._resolve_pending():
+        if not self._release_session("cerrar"):
             return False
         self.db.close()
         return True
 
-    def _cancel_running_work(self):
+    def _release_session(self, verb):
+        """Antes de cerrar, desconectar o reconectar (verb): cambios de la grilla sin guardar, algo
+        corriendo y cambios sin confirmar. True si se puede seguir."""
+        unsaved = [self.sheets.tabText(i) for i in range(self.sheets.count())
+                   if hasattr(self.sheets.widget(i), "results") and self.sheets.widget(i).results.has_unsaved_changes()]
+        if unsaved and not self._confirm(
+                "Cambios sin guardar", f"{self.name}: hay cambios sin guardar en los resultados de "
+                f"{', '.join(unsaved)}. ¿{verb.capitalize()} y descartarlos?"):
+            return False
+        if not self.db.connected:
+            return True                          # ya no hay sesión: nada corriendo ni pendiente que salvar
+        if self.debugger.active or self.db.busy:
+            closed = self._cancel_running_work(verb)
+            if closed is not None:
+                return closed
+        return not self.pending or self._resolve_pending(verb)
+
+    def _cancel_running_work(self, verb="cerrar"):
         """None si quedó libre; True si se cerró a la fuerza; False si el usuario prefirió esperar."""
         what = "una depuración en curso" if self.debugger.active else "una consulta en ejecución"
-        if not self._ask("En ejecución", f"{self.name} tiene {what}.\n\n¿Cancelarla y cerrar?",
-                         "Cancelar y cerrar", "Seguir esperando"):
+        if not self._ask("En ejecución", f"{self.name} tiene {what}.\n\n¿Cancelarla y {verb}?",
+                         f"Cancelar y {verb}", "Seguir esperando"):
             return False
         if self.debugger.active:
             self.debugger.stop()
@@ -397,20 +436,20 @@ class ConnectionTab(QWidget):
         if self._wait_until_free(self.CLOSE_WAIT_S):
             return None
         if not self._ask("Sin respuesta",
-                         f"{self.name} no respondió a la cancelación.\n\n¿Cerrar de todas formas? "
+                         f"{self.name} no respondió a la cancelación.\n\n¿{verb.capitalize()} de todas formas? "
                          "Oracle deshará (Rollback) los cambios sin confirmar de esta conexión.",
-                         "Cerrar de todas formas", "Seguir esperando"):
+                         f"{verb.capitalize()} de todas formas", "Seguir esperando"):
             return False
         self.db.close()
         return True
 
-    def _resolve_pending(self):
+    def _resolve_pending(self, verb="cerrar"):
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Warning)
         box.setWindowTitle("Cambios sin confirmar")
         box.setText(f"La conexión {self.name} tiene cambios sin confirmar.")
-        commit_b = box.addButton("Commit y cerrar", QMessageBox.AcceptRole)
-        rollback_b = box.addButton("Rollback y cerrar", QMessageBox.DestructiveRole)
+        commit_b = box.addButton(f"Commit y {verb}", QMessageBox.AcceptRole)
+        rollback_b = box.addButton(f"Rollback y {verb}", QMessageBox.DestructiveRole)
         box.addButton("Cancelar", QMessageBox.RejectRole)
         box.exec()
         if box.clickedButton() == commit_b:
@@ -418,3 +457,83 @@ class ConnectionTab(QWidget):
         if box.clickedButton() == rollback_b:
             return self.rollback()
         return False
+
+    # --- desconectar y reconectar
+    @property
+    def connected(self):
+        return self.db.connected
+
+    def disconnect(self):
+        """Cierra la sesión de Oracle; la pestaña, las hojas y los visores quedan como están."""
+        if not self.connected or self.reconnecting or not self._release_session("desconectar"):
+            return False
+        self._forget_streams()
+        self.db.disconnect()
+        self.set_pending(False)
+        self._set_connected(False, "● Desconectado")
+        return True
+
+    def reconnect(self, then=None):
+        """Abre una sesión nueva con el mismo usuario (sin pedir la contraseña: está en memoria).
+        then: qué hacer al conectarse (p. ej. ejecutar la consulta que se pidió sin conexión)."""
+        if self.reconnecting or (self.connected and not self._release_session("reconectar")):
+            return
+        self._forget_streams()
+        self.reconnecting = True
+        self._update_connection_widgets()
+        self.conn_state.setStyleSheet(f"color: {MUTED_COLOR}; font-weight: bold;")
+        self.conn_state.setText("⟳ Reconectando…")
+
+        def ok(_):
+            self.reconnecting = False
+            self.set_pending(False)
+            self.completion.clear()                  # metadatos nuevos
+            self._set_connected(True)
+            self.explorer.load_schemas()
+            if then:
+                then()
+
+        def failed(msg):
+            self.reconnecting = False
+            self._set_connected(False, "● Sin conexión")
+            QMessageBox.warning(self, "Reconectar", f"No se pudo reconectar {self.name}:\n\n{msg}")
+
+        self.runner.run(self.db.reconnect, ok, failed)
+
+    def _on_lost(self, msg):
+        lost_changes = self.pending
+        self._forget_streams()
+        self.set_pending(False)
+        self._set_connected(False, "● Conexión perdida")
+        self.conn_state.setToolTip(msg)
+        detail = ("\n\nLos cambios sin confirmar se perdieron (Oracle los deshizo al cortarse la sesión)."
+                  if lost_changes else "")
+        QMessageBox.warning(self, "Conexión perdida",
+                            f"Se perdió la conexión {self.name} con Oracle:\n{msg}{detail}\n\n"
+                            "Tus hojas siguen aquí. Usa ⟳ Reconectar para seguir trabajando.")
+
+    def _set_connected(self, connected, why=""):
+        if connected:
+            self.conn_state.setText("")
+            self.conn_state.setToolTip("")
+        else:
+            self.conn_state.setStyleSheet(f"color: {ERROR_COLOR}; font-weight: bold;")
+            self.conn_state.setText(why)
+        self._update_connection_widgets()
+        self.connection_changed.emit(connected)
+        self.pending_changed.emit()                  # el título de la pestaña muestra el estado
+
+    def _update_connection_widgets(self):
+        on = self.connected and not self.reconnecting
+        for b in (self.commit_btn, self.rollback_btn, self.disconnect_btn):
+            b.setEnabled(on)
+        self.reconnect_btn.setEnabled(not self.reconnecting)
+        self.reconnect_btn.setStyleSheet("" if self.connected else f"color: {OK_COLOR}; font-weight: bold;")
+
+    def _forget_streams(self):
+        """Los cursores abiertos para paginar mueren con la sesión."""
+        for i in range(self.sheets.count()):
+            w = self.sheets.widget(i)
+            panel = w.data_panel if isinstance(w, ObjectViewer) else getattr(w, "results", None)
+            if panel is not None:
+                panel.forget_stream()

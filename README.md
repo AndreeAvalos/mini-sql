@@ -13,6 +13,9 @@ explorador de objetos, autocompletado, edición y compilación de paquetes, y de
 
 ## Funciones
 
+- **Desconectar y reconectar** sin cerrar la pestaña: las hojas quedan abiertas y ⟳ Reconectar abre una sesión
+  nueva sin pedir la contraseña. Si Oracle corta la conexión (red, inactividad, sesión terminada) se avisa y se
+  ofrece reconectar al ejecutar.
 - **Varias conexiones y hojas en pestañas.** Cada conexión tiene su explorador y sus hojas; todas comparten la
   transacción de la conexión, con Commit/Rollback explícitos (autocommit apagado).
 - **Editar los resultados** de una consulta de una sola tabla: celdas, filas nuevas y borradas, validando cada

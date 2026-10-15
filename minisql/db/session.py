@@ -24,6 +24,20 @@ class SessionBusy(Exception):
     """La sesión principal está ejecutando otra cosa."""
 
 
+class NotConnected(Exception):
+    """La conexión está cerrada (se desconectó o se perdió): hay que reconectar."""
+
+
+# Errores que dicen que la sesión de Oracle ya no existe (red caída, sesión terminada, timeout por inactividad…)
+LOST_CONNECTION = ("DPY-1001", "DPY-4011", "DPI-1080", "ORA-00028", "ORA-01012", "ORA-02396", "ORA-03113",
+                   "ORA-03114", "ORA-03135", "ORA-12537")
+
+
+def connection_lost(error):
+    """True si el error significa que se perdió la conexión con Oracle."""
+    return isinstance(error, NotConnected) or any(code in str(error) for code in LOST_CONNECTION)
+
+
 class ScriptError(Exception):
     """Falló una sentencia de un script; el mensaje dice cuál y qué pasó con las anteriores."""
 
@@ -99,6 +113,8 @@ class OracleSession:
         self.meta_lock = threading.Lock() if self.own_meta else self.lock
         self.opener = opener
         self.output_enabled = False       # DBMS_OUTPUT.ENABLE ya se llamó en la sesión principal
+        self.connected = True             # False: desconectada a pedido o conexión perdida
+        self._user = getattr(conn, "username", "") or ""
 
     @classmethod
     def open(cls, user, password, dsn):
@@ -116,8 +132,8 @@ class OracleSession:
     # --- datos de la sesión
     @property
     def user(self):
-        """Usuario tal como se conectó."""
-        return self.conn.username or ""
+        """Usuario tal como se conectó (se recuerda: con la conexión cerrada no se puede preguntar)."""
+        return self._user
 
     @property
     def schema(self):
@@ -130,7 +146,48 @@ class OracleSession:
 
     @property
     def transaction_in_progress(self):
-        return getattr(self.conn, "transaction_in_progress", None)
+        if not self.connected:
+            return None
+        try:
+            return getattr(self.conn, "transaction_in_progress", None)
+        except Exception:
+            return None
+
+    # --- desconectar y reconectar
+    def disconnect(self):
+        """Cierra las sesiones de Oracle (Oracle deshace lo que no se confirmó). Se puede reconectar."""
+        self.connected = False
+        self.output_enabled = False
+        self.close()
+
+    def reconnect(self):
+        """Abre sesiones nuevas con las mismas credenciales (las de opener, solo en memoria) y cierra las
+        anteriores si quedaban. Corre en un hilo: es una llamada de red."""
+        if self.opener is None:
+            raise NotConnected("No hay datos para reconectar: cierra la conexión y vuelve a abrirla.")
+        if not self.lock.acquire(blocking=False):
+            raise SessionBusy("Hay una consulta en ejecución en esta conexión; espera a que termine.")
+        try:
+            conn = self.opener()
+            conn.autocommit = False
+            try:
+                meta = self.opener()
+            except oracledb.Error:
+                meta = None                       # se comparte la principal
+            self.close()                          # las viejas, si seguían abiertas
+            self.conn, self.meta_conn = conn, meta or conn
+            if (meta is not None) != self.own_meta:
+                self.meta_lock = threading.Lock() if meta is not None else self.lock
+            self.own_meta = meta is not None
+            self._user = getattr(conn, "username", "") or self._user
+            self.output_enabled = False
+            self.connected = True
+        finally:
+            self.lock.release()
+
+    def _require_connection(self):
+        if not self.connected:
+            raise NotConnected("Sin conexión: usa ⟳ Reconectar.")
 
     # --- sesión principal
     def execute(self, sql, on_output=None):
@@ -138,6 +195,7 @@ class OracleSession:
         headers/rows/more si es una consulta (la primera página), o message. Si quedan filas, res["stream"]
         es un RowStream para traer las siguientes páginas. Llama on_output(líneas) con lo que imprimió
         DBMS_OUTPUT, también si la sentencia falla (el error se propaga después)."""
+        self._require_connection()
         kw = first_keyword(sql)
         t0 = time.perf_counter()
         with self.lock:
@@ -180,6 +238,7 @@ class OracleSession:
         """Ejecuta varias sentencias en orden en la sesión principal (como un script de SQL*Plus).
         Se detiene en la primera que falla (ScriptError); las anteriores quedan hechas y, si cambiaron
         datos, pendientes de Commit. Devuelve el resultado de la última consulta que trajo filas, o un resumen."""
+        self._require_connection()
         t0 = time.perf_counter()
         total, kws, grid, changed = len(statements), [], None, 0
         with self.lock:
@@ -221,6 +280,7 @@ class OracleSession:
 
     def apply_grid_changes(self, owner, table, ops):
         """Guarda los cambios de la grilla en la sesión principal (quedan pendientes de Commit)."""
+        self._require_connection()
         if not self.lock.acquire(blocking=False):
             raise SessionBusy("Hay una consulta en ejecución en esta conexión; espera a que termine.")
         try:
@@ -274,6 +334,7 @@ class OracleSession:
         self._with_free_connection(self.conn.rollback)
 
     def _with_free_connection(self, action):
+        self._require_connection()
         if not self.lock.acquire(blocking=False):
             raise SessionBusy("Hay una consulta en ejecución en esta conexión.")
         try:
@@ -296,6 +357,7 @@ class OracleSession:
     # --- sesión de metadatos
     def with_meta_cursor(self, fn):
         """Ejecuta fn(cursor) en la sesión de metadatos y devuelve su resultado."""
+        self._require_connection()
         with self.meta_lock, self.meta_conn.cursor() as cur:
             return fn(cur)
 

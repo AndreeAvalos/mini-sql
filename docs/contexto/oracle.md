@@ -15,6 +15,7 @@ Pruebas: `tests/test_session.py`, `test_objects.py`, `test_guard.py`, con `FakeC
   (`ScriptError` dice cuál y si las anteriores quedaron pendientes de Commit).
 - `apply_grid_changes(owner, table, ops)`, `commit`, `rollback`, `cancel` (cancela la llamada en curso),
   `with_meta_cursor(fn)`, `transaction_in_progress`, `close`.
+- `disconnect()` / `reconnect()` (con `opener`, en un hilo; `SessionBusy` si hay algo corriendo) y `connected`. Sin conexión, `execute`, `execute_script`, `with_meta_cursor`, commit/rollback y la grilla lanzan `NotConnected`. `connection_lost(error)`: ORA-03113/03114/03135/02396/00028/01012, DPY-1001/4011, DPI-1080. `user` se recuerda (no se lee de una conexión cerrada).
 - `read_dbms_output(cur)`: lee DBMS_OUTPUT por bloques; `output_enabled` evita habilitarlo cada vez.
 - Autocommit apagado: el usuario decide Commit/Rollback.
 

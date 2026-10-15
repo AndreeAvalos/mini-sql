@@ -88,6 +88,8 @@ class ResultPanel(QWidget):
         self.prev_btn.setArrowType(Qt.LeftArrow)
         self.next_btn.setArrowType(Qt.RightArrow)
         self.paging = (self.prev_btn, self.page_label, self.next_btn, self.all_btn)
+        for w in self.paging:
+            w.hide()                                       # sin resultados todavía, no hay páginas
 
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)
@@ -322,6 +324,14 @@ class ResultPanel(QWidget):
         if stream is not None and not stream.done:
             # cerrarlo toma el candado de la sesión: en un hilo, por si otra hoja está ejecutando
             threading.Thread(target=stream.close, daemon=True).start()
+
+    def forget_stream(self):
+        """La sesión se cerró: el cursor abierto ya no sirve (no hay nada que cerrar en Oracle)."""
+        if self.stream is not None:
+            self.stream.done = True
+            self.stream = None
+            if self.model is not None:
+                self._update_count()
 
     def dispose(self):
         """La hoja o el visor se cierra: libera el cursor abierto en Oracle."""

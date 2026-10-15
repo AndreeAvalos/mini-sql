@@ -85,6 +85,8 @@ class FakeCursor:
             FakeDebugSession.finished.wait(10)
             self.debugging = False
         FakeCursor.buffer += re.findall(r"put_line\('([^']*)'\)", sql, re.I)
+        if "perder_conexion" in self.sql:         # Oracle cortó la sesión (red, timeout, sesión terminada)
+            raise RuntimeError("ORA-03113: end-of-file on communication channel")
         if "raise_application_error" in self.sql:
             raise RuntimeError("ORA-20001: falló a propósito")
         if "dbms_debug.initialize" in self.sql:

@@ -34,6 +34,7 @@ falla con `ScriptError`; `on_error` llama `refresh_pending`). 5. `show_running_s
 - `find_bar.py`: `with_find_bar(editor)` devuelve el contenedor; Ctrl+F, Ctrl+H, F3, Shift+F3, Esc.
 
 ## Otros
+- Conexión: ⏏ Desconectar / ⟳ Reconectar en la barra de `ConnectionTab` (`disconnect`, `reconnect(then)`). Ambas pasan por `_release_session(verbo)` (grilla sin guardar, algo corriendo, Commit/Rollback pendiente), igual que `close_connection`. `_watch(fn)` envuelve lo que corre en hilos: si el error es de conexión perdida, marca `db.connected=False` y emite `_lost` → `_on_lost` (aviso, pendiente perdido, `forget_stream` de los paneles). `SheetWidget.run` sin conexión ofrece "Reconectar y ejecutar". Título de la pestaña: "○ " si está desconectada. Pruebas: `tests/test_reconnect.py` (`perder_conexion` en FakeCursor lanza ORA-03113).
 - `ConnectionTab.current_sheet()` siempre devuelve una SheetWidget (nunca un visor).
 - Zoom: `style.font_zoom` (FontZoom, uno para toda la app, config.json `font_size`); los widgets se suscriben a `font_zoom.changed` con un método propio (`apply_font_size`) y en `wheelEvent` llaman `font_zoom.wheel(e)` (SqlEditor/CodeEditor, `MonoText` para salidas, ResultView con `ui_font`). Ctrl+0 = `reset`. Las pruebas lo aíslan en memoria (conftest `isolated_font_zoom`).
 - `style.py`: `mono_font`, `is_dark`, `StatusLabel`, `RESULT_THEME` (claro/oscuro) y `result_stylesheet`.

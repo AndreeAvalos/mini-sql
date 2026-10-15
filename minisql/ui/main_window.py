@@ -135,7 +135,9 @@ class MainWindow(QMainWindow):
     def update_title(self, tab):
         i = self.tabs.indexOf(tab)
         if i >= 0:
-            self.tabs.setTabText(i, ("● " if tab.pending else "") + tab.name)
+            mark = "○ " if not tab.connected else ("● " if tab.pending else "")
+            self.tabs.setTabText(i, mark + tab.name)
+            self.tabs.setTabToolTip(i, "Desconectada: usa ⟳ Reconectar" if not tab.connected else "")
 
     def close_conn(self, i):
         tab = self.tabs.widget(i)

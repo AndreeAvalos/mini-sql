@@ -71,7 +71,7 @@ class MainWindow(QMainWindow):
 
         self.keeper = SessionKeeper(self, session_path)
         if restore:
-            QTimer.singleShot(0, self.restore_session)   # el guardián arranca al terminar de recuperar
+            QTimer.singleShot(0, self, self.restore_session)   # el guardián arranca al terminar de recuperar
         else:
             self.keeper.start()
         self.updates.start()

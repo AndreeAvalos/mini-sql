@@ -22,6 +22,8 @@ test_sheet, test_results, test_grid, test_debugger, test_app (instancia única, 
 test_selftest (autoprueba del .exe, keyring solo obligatorio en Windows).
 
 ## Reglas
+- `conftest.tidy_qt_objects` borra las ventanas de cada prueba al terminar y recolecta la basura ahí: si no, PySide6 se caía al azar (access violation) al destruir widgets viejos con hilos corriendo. No borra popups (autocompletado, menús): son de otro objeto.
+- `QTimer.singleShot` con widgets: siempre `singleShot(ms, widget, función)` (se cancela si el widget se destruye). Nada de filtros de eventos que toquen a otro widget al ocultarse: en la destrucción tocarían uno a medio destruir.
 - Cada cambio de comportamiento lleva prueba. `ruff check .` sin avisos.
 - Ruff marca caracteres ambiguos (RUF001): no usar ＋, −, etc. en cadenas; usar sus equivalentes ASCII.
 - En Windows, escribir archivos con la herramienta de edición, no con heredocs (se rompen `\n` y `\t`).

@@ -100,24 +100,11 @@ def card(widget, margins=6):
     box.setSpacing(0)
     box.addWidget(widget)
     frame.setVisible(not widget.isHidden())
-    frame.follower = _FollowVisibility(frame, widget)     # si el contenido se oculta, la tarjeta también
+    # Si el contenido se oculta y se muestra solo (el panel de depuración), él mismo mueve su tarjeta: ver
+    # DebugPanel.setVisible. Nada de filtros de eventos aquí: al destruir la ventana, Qt oculta los hijos y un
+    # filtro que ocultara la tarjeta tocaría un widget a medio destruir (access violation al cerrar una conexión).
+    widget.card_frame = frame
     return frame
-
-
-class _FollowVisibility(QObject):
-    def __init__(self, frame, widget):
-        super().__init__(frame)
-        self.frame = frame
-        widget.installEventFilter(self)
-
-    def eventFilter(self, _obj, event):
-        from PySide6.QtCore import QEvent
-
-        if event.type() == QEvent.HideToParent:
-            self.frame.hide()
-        elif event.type() == QEvent.ShowToParent:
-            self.frame.show()
-        return False
 
 
 def variant(button, name):

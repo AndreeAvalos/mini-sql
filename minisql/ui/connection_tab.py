@@ -384,7 +384,7 @@ class ConnectionTab(QWidget):
         cur = sheet.editor.textCursor()
         cur.setPosition(min(t.get("cursor", 0), len(text)))
         sheet.editor.setTextCursor(cur)
-        QTimer.singleShot(0, sheet.editor.ensureCursorVisible)   # el cursor recuperado, siempre a la vista
+        QTimer.singleShot(0, sheet.editor, sheet.editor.ensureCursorVisible)   # el cursor recuperado, a la vista
         m = re.fullmatch(r"Hoja(\d+)", t.get("title") or "")
         if m:
             self.sheet_counter = max(self.sheet_counter, int(m.group(1)))

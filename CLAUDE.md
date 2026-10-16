@@ -31,9 +31,12 @@ archivos que vas a cambiar. Si un cambio deja desactualizado un documento de `do
 en el mismo cambio.
 
 Agentes del proyecto (`.claude/agents/`), uno por área: `sql-texto`, `oracle-db`, `interfaz-qt`,
-`grilla-resultados`, `depurador-plsql`, `guardian-sesion`, `verificador` (pytest/ruff/capturas, resume solo
-fallos), `release` y `revisor-seguridad` (solo lectura). Delegar en ellos las tareas de su área y la
-verificación mantiene corto el contexto principal.
+`grilla-resultados`, `depurador-plsql`, `guardian-sesion`, `verificador`, `release` y `revisor-seguridad` (solo
+lectura). Delegar en ellos las tareas de su área mantiene corto el contexto principal.
+
+**Pruebas: siempre con el agente `verificador`**, no desde la conversación principal. Modo `rapido` (solo las
+pruebas del área) mientras se trabaja, `completo` (la suite una vez) al terminar, `intermitente` solo ante un
+fallo que aparece a veces (tope de corridas). No repetir la suite "por las dudas".
 
 ## Reglas que hay que mantener
 

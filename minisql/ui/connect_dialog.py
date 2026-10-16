@@ -118,7 +118,7 @@ class ConnectDialog(QDialog):
             self.dsn.setCurrentText(preset.get("dsn") or "")
             self.password.setFocus()
         if self.password.text():
-            QTimer.singleShot(0, self.try_connect)   # contraseña en el llavero: reconectar sin preguntar
+            QTimer.singleShot(0, self, self.try_connect)   # contraseña en el llavero: reconectar sin preguntar
 
     def browse_tns(self):
         start = self.tns_path.text().strip() or str(Path.home())

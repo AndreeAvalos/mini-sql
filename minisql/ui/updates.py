@@ -129,7 +129,7 @@ class UpdateManager(QObject):
             self._set(last_run_version=__version__)
         update.clean_downloads(self.downloads)
         if update.should_check(self.settings):
-            QTimer.singleShot(4000, lambda: self.check(manual=False))
+            QTimer.singleShot(4000, self, lambda: self.check(manual=False))
 
     # --- revisar
     def check(self, manual=True):
@@ -190,7 +190,7 @@ class UpdateManager(QObject):
 
     def _open_whats_new(self, title, intro, entries):
         if QApplication.activeModalWidget() is not None:          # p. ej. pidiendo la contraseña al abrir
-            QTimer.singleShot(1000, lambda: self._open_whats_new(title, intro, entries))
+            QTimer.singleShot(1000, self, lambda: self._open_whats_new(title, intro, entries))
             return
         self.whats_new = WhatsNewDialog(title, intro, update.changelog_markdown(entries), update.RELEASES_PAGE,
                                         self.window)

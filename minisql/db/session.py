@@ -16,7 +16,7 @@ import oracledb
 
 from ..config import MAX_OUTPUT_LINES, PAGE_ROWS
 from ..sql.editable import rowid_query
-from ..sql.text import DDL, DML, first_keyword
+from ..sql.text import DDL, DML, blank_literals, first_keyword
 from .grid import apply_changes
 
 
@@ -36,6 +36,47 @@ LOST_CONNECTION = ("DPY-1001", "DPY-4011", "DPI-1080", "ORA-00028", "ORA-01012",
 def connection_lost(error):
     """True si el error significa que se perdió la conexión con Oracle."""
     return isinstance(error, NotConnected) or any(code in str(error) for code in LOST_CONNECTION)
+
+
+class RemoteLobError(Exception):
+    """Una columna LOB de una tabla remota no se pudo traer por el dblink."""
+
+
+# Errores de una columna LOB (BLOB/CLOB) traída por un dblink: ORA-22992 es el clásico; con el modo thin y los LOB
+# pedidos como bytes/texto, la base remota responde ORA-03149 ("código de error no válido").
+REMOTE_LOB_CODES = ("ORA-03149", "ORA-22992")
+REMOTE_LOB_HELP = ("La base remota rechazó la consulta y su mensaje no llegó por el dblink. Suele ser:\n"
+                   "• una columna BLOB/CLOB que el dblink no deja leer: quítala del SELECT (en vez de *, lista las "
+                   "columnas) o trae solo una parte con DBMS_LOB.GETLENGTH(col) o DBMS_LOB.SUBSTR(col, 2000, 1);\n"
+                   "• una columna o tabla que no existe con ese nombre en la base remota, o falta de permisos.")
+
+
+def remote_lob_error(error, sql):
+    """True si el error es de un LOB remoto: uno de esos códigos y la consulta usa un dblink (tabla@link)."""
+    return any(code in str(error) for code in REMOTE_LOB_CODES) and "@" in blank_literals(sql)
+
+
+def lob_locators(cursor, metadata):
+    """outputtypehandler: los LOB llegan como referencia (LOB), que sí cruzan el dblink en Oracle 12.2+."""
+    if metadata.type_code in (oracledb.DB_TYPE_BLOB, oracledb.DB_TYPE_CLOB, oracledb.DB_TYPE_NCLOB):
+        return cursor.var(metadata.type_code, arraysize=cursor.arraysize)
+    return None
+
+
+def read_lobs(*row):
+    """rowfactory: cada referencia LOB se lee y queda como bytes/texto, igual que el resto de los resultados.
+    Si el dblink tampoco deja leerla, la celda lo dice y el resto de la fila se ve igual."""
+    return tuple(_read_lob(v) for v in row)
+
+
+def _read_lob(value):
+    if isinstance(value, (str, bytes)) or not hasattr(value, "read"):
+        return value
+    try:
+        return value.read()
+    except Exception:
+        kind = getattr(getattr(value, "type", None), "name", "LOB").replace("DB_TYPE_", "")
+        return f"<{kind} no se pudo leer por el dblink>"
 
 
 class ScriptError(Exception):
@@ -293,9 +334,24 @@ class OracleSession:
     @staticmethod
     def _run(cur, sql, kw):
         cur.arraysize = PAGE_ROWS
-        cur.execute(sql)
+        try:
+            cur.execute(sql)
+            rows = cur.fetchmany(PAGE_ROWS) if cur.description else None
+        except Exception as e:
+            if not remote_lob_error(e, sql):
+                raise
+            # Un BLOB/CLOB por un dblink: la base remota no deja convertirlo a bytes/texto (fetch_lobs=False)
+            # y responde ORA-03149 o ORA-22992. Se repite pidiendo el LOB como referencia y leyéndolo aparte.
+            cur.outputtypehandler = lob_locators
+            cur.rowfactory = read_lobs
+            try:
+                cur.execute(sql)
+                rows = cur.fetchmany(PAGE_ROWS) if cur.description else None
+            except Exception as again:
+                if remote_lob_error(again, sql):
+                    raise RemoteLobError(REMOTE_LOB_HELP + f"\n\n{again}") from again
+                raise
         if cur.description:
-            rows = cur.fetchmany(PAGE_ROWS)
             return {
                 "headers": [d[0] for d in cur.description],
                 "rows": rows,

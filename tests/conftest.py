@@ -1,4 +1,5 @@
 """Configuración común de las pruebas: Qt sin ventana y el paquete en el path."""
+import gc
 import os
 import sys
 from pathlib import Path
@@ -8,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # el paquete mini
 sys.path.insert(0, str(Path(__file__).resolve().parent))       # support.py
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent, Qt
 from PySide6.QtWidgets import QApplication
 
 
@@ -29,3 +31,23 @@ def isolated_font_zoom(monkeypatch):
 @pytest.fixture(scope="session")
 def app():
     return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(autouse=True)
+def tidy_qt_objects():
+    """Al terminar cada prueba, sus ventanas se borran en orden (deleteLater y sus eventos) y la basura se recolecta
+    ahí mismo. Si no, el recolector de Python destruye widgets de pruebas viejas en cualquier momento, a veces con
+    hilos de trabajo corriendo, y PySide6 puede caerse (access violation)."""
+    yield
+    qt = QApplication.instance()
+    if qt is None:
+        return
+    for widget in qt.topLevelWidgets():
+        # solo las ventanas de la prueba: los popups (lista del autocompletado, menús) son de otro objeto, que los
+        # borra él; borrarlos aquí también sería un doble borrado
+        if widget.parentWidget() is None and widget.windowType() in (Qt.Widget, Qt.Window):
+            widget.hide()
+            widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    qt.processEvents()
+    gc.collect()

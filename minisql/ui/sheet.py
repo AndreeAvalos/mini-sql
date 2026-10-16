@@ -294,7 +294,7 @@ class SheetWidget(QWidget):
             self.editor.setTextCursor(view)           # llevar la sentencia a la vista…
             self.editor.centerCursor()
             self.editor.setTextCursor(keep)           # …sin perder la selección ni la posición del cursor
-        QTimer.singleShot(self.RUN_FLASH_MS, lambda: self.editor.set_highlights("run", []))
+        QTimer.singleShot(self.RUN_FLASH_MS, self.editor, lambda: self.editor.set_highlights("run", []))
 
     def confirm(self, statements):
         """Pide confirmación si alguna sentencia es peligrosa. statements: lista (o una sola sentencia)."""

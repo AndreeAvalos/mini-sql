@@ -25,6 +25,12 @@ from .results import ResultView
 
 class DebugPanel(QWidget):
     """Panel inferior de depuración: botones, ubicación, variables, pila y salida."""
+    card_frame = None                     # su tarjeta (style.card): se oculta y se muestra con el panel
+
+    def setVisible(self, visible):
+        super().setVisible(visible)
+        if self.card_frame is not None:
+            self.card_frame.setVisible(visible)
 
     def __init__(self, debugger):
         super().__init__()

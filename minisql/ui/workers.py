@@ -31,7 +31,9 @@ class TaskRunner(QObject):
                 callback, result = on_ok, fn()
             except Exception as e:
                 callback, result = on_err, str(e)
-            self._finished.emit(callback, result)
+            # RuntimeError: la pestaña se cerró mientras esto corría y el runner ya no existe; nadie espera la respuesta
+            with contextlib.suppress(RuntimeError):
+                self._finished.emit(callback, result)
         threading.Thread(target=work, daemon=True).start()
 
     @staticmethod

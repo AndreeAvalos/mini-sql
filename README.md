@@ -22,6 +22,8 @@ explorador de objetos, autocompletado, edición y compilación de paquetes, y de
   valor contra la columna (tipo, largo, decimales, NOT NULL). **Guardar** muestra antes las sentencias que se
   van a ejecutar, aplica los cambios por ROWID y quedan pendientes de Commit; **Cancelar** los descarta.
 - **Filtrar y ordenar** los resultados: texto libre, `=valor`, `>100`, `<=2026-01-31`, `null`, `!null`.
+- **Resultados abajo o a la derecha:** arrastra la pestaña «Resultados» hacia la derecha o hacia abajo (o usa ⇆/⇅);
+  se recuerda para todas las hojas.
 - **Paginación:** se traen de Oracle **200 filas por página**; ▶ trae la siguiente y «⏬ Todas» el resto (hasta
   100.000). El filtro y el orden se aplican a las filas ya cargadas.
 - **Ejecución sin congelar la ventana**, con cancelación y tiempo transcurrido.

@@ -74,7 +74,9 @@ def test_disconnect_keeps_the_sheets_and_reconnect_resumes(app, tmp_path, monkey
                         staticmethod(lambda *a, **k: asked.append(a[2]) or QMessageBox.Yes))
     sheet.run()                                                         # sin conexión: ofrece reconectar
     assert asked and "Reconectar y ejecutar" in asked[0]
-    assert wait_until(app, lambda: tab.connected and not sheet.running and sheet.results.model is not None)
+    # db.connected cambia en el hilo de trabajo; la interfaz se actualiza después (reconnecting vuelve a False)
+    assert wait_until(app, lambda: not tab.reconnecting and tab.connected and not sheet.running
+                      and sheet.results.model.rowCount() == 2)
     assert w.tabs.tabText(0) == "DEV" and tab.conn_state.text() == "" and tab.commit_btn.isEnabled()
     assert sheet.results.model.rowCount() == 2                          # y ejecutó la consulta
 

@@ -129,6 +129,13 @@ def _images(t):
     }
 
 
+def _line(color, axis):
+    """Fondo de un divisor: una línea de 2 px en el centro (axis "y": horizontal; "x": vertical)."""
+    end = "x2:0, y2:1" if axis == "y" else "x2:1, y2:0"
+    return (f"qlineargradient(x1:0, y1:0, {end}, stop:0 transparent, stop:0.39 transparent, "
+            f"stop:0.4 {color}, stop:0.6 {color}, stop:0.61 transparent, stop:1 transparent)")
+
+
 def stylesheet(t, images):
     return f"""
     QToolTip {{
@@ -186,8 +193,8 @@ def stylesheet(t, images):
     /* --- casillas */
     QCheckBox {{ spacing: 7px; }}
     QCheckBox::indicator {{
-        width: 15px; height: 15px; border-radius: 4px; border: 1px solid {t['border_strong']};
-        background: {t['surface']};
+        width: 15px; height: 15px; border-radius: 4px; border: 1px solid {t['muted']};
+        background: {t['surface2']};
     }}
     QCheckBox::indicator:hover {{ border-color: {t['accent']}; }}
     QCheckBox::indicator:checked {{
@@ -231,6 +238,11 @@ def stylesheet(t, images):
     QSplitter::handle {{ background: transparent; }}
     QSplitter::handle:horizontal {{ width: 8px; }}
     QSplitter::handle:vertical {{ height: 8px; }}
+    /* entre el editor y los resultados (abajo o a la derecha): una línea visible que se puede arrastrar */
+    QSplitter#editorSplit::handle:vertical {{ height: 10px; background: {_line(t['border_strong'], 'y')}; }}
+    QSplitter#editorSplit::handle:vertical:hover {{ background: {_line(t['accent'], 'y')}; }}
+    QSplitter#editorSplit::handle:horizontal {{ width: 10px; background: {_line(t['border_strong'], 'x')}; }}
+    QSplitter#editorSplit::handle:horizontal:hover {{ background: {_line(t['accent'], 'x')}; }}
     QScrollBar:vertical {{ background: transparent; width: 11px; margin: 0; }}
     QScrollBar:horizontal {{ background: transparent; height: 11px; margin: 0; }}
     QScrollBar::handle {{ background: {t['border_strong']}; border-radius: 4px; margin: 2px; }}
@@ -249,6 +261,7 @@ def stylesheet(t, images):
     QMenu::separator {{ height: 1px; background: {t['border']}; margin: 5px 8px; }}
     QMenu::indicator {{ width: 14px; height: 14px; margin-left: 6px; }}
     QStatusBar {{ color: {t['muted']}; }}
+    QFrame#dropZone {{ background: {t['accent_soft']}; border: 2px dashed {t['accent']}; border-radius: 8px; }}
     QProgressBar {{
         background: {t['surface2']}; border: 1px solid {t['border']}; border-radius: 6px; text-align: center;
     }}

@@ -148,6 +148,29 @@ class ResultPanel(QWidget):
             self._update_count()
 
     # --- mostrar resultados
+    # --- angosto (p. ej. resultados a la derecha): botones solo con su símbolo, filtro más corto
+    COMPACT_WIDTH = 900
+    compact = False
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.set_compact(self.width() < self.COMPACT_WIDTH)
+
+    def set_compact(self, compact):
+        if compact == self.compact:
+            return
+        self.compact = compact
+        for button in (self.add_btn, self.dup_btn, self.del_btn, self.save_btn, self.cancel_btn):
+            full = button.property("full_text") or button.text()
+            button.setProperty("full_text", full)
+            button.setText(full.split(" ", 1)[0] if compact else full)
+        self.filter_edit.setMinimumWidth(90 if compact else 170)
+        self.filter_column.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon if compact
+                                               else QComboBox.AdjustToContents)
+        self.filter_column.setMinimumContentsLength(8)
+        # el estado (✎ TABLA / 🔒 motivo) cede espacio; completo en su tooltip
+        self.state.setSizePolicy(QSizePolicy.Ignored if compact else QSizePolicy.Minimum, QSizePolicy.Preferred)
+
     @property
     def model(self):
         return self.view.model()

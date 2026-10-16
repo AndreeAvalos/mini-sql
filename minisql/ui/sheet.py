@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QTabWidget,
     QTextEdit,
@@ -34,6 +35,7 @@ from .editors import MonoText, SqlEditor
 from .find_bar import with_find_bar
 from .result_panel import ResultPanel
 from .results import ResultModel
+from .results_dock import ResultsDragger, placement
 from .style import StatusLabel, variant
 from .workers import Emitter
 
@@ -87,7 +89,16 @@ class SheetWidget(QWidget):
         self.result_tabs.setDocumentMode(True)
         self.result_tabs.addTab(self.results, "Resultados")
         self.result_tabs.addTab(self.output, "DBMS_OUTPUT")
-        self.result_tabs.setCornerWidget(clear_out, Qt.TopRightCorner)
+        self.side_btn = QToolButton()
+        self.side_btn.setAutoRaise(True)
+        self.side_btn.clicked.connect(placement.toggle)
+        corner = QWidget()
+        corner_row = QHBoxLayout(corner)
+        corner_row.setContentsMargins(0, 0, 0, 0)
+        corner_row.setSpacing(2)
+        corner_row.addWidget(clear_out)
+        corner_row.addWidget(self.side_btn)
+        self.result_tabs.setCornerWidget(corner, Qt.TopRightCorner)
         self.output_check.toggled.connect(lambda on: self.result_tabs.setTabVisible(1, on))
         self.last_output = 0
 
@@ -101,13 +112,23 @@ class SheetWidget(QWidget):
         bar.addSpacing(12)
         bar.addWidget(self.status, 1)
         self.status.setObjectName("muted")
+        self.output_check.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)    # nunca la tapa un mensaje largo
+        self.status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # el mensaje cede espacio
 
-        splitter = QSplitter(Qt.Vertical)
+        splitter = self.splitter = QSplitter(Qt.Vertical)
+        splitter.setObjectName("editorSplit")             # su divisor se dibuja como una línea (theme.py)
+        splitter.setChildrenCollapsible(False)
         editor_box = with_find_bar(self.editor)         # Ctrl+F buscar, Ctrl+H reemplazar
         self.find_bar = editor_box.find_bar
         splitter.addWidget(editor_box)
         splitter.addWidget(self.result_tabs)
         splitter.setSizes([300, 400])
+        editor_box.setMinimumSize(220, 90)               # ningún lado se puede aplastar del todo
+        self.result_tabs.setMinimumSize(300, 120)        # (y los resultados se compactan si quedan angostos)
+        # resultados abajo o a la derecha: arrastrando sus pestañas o con el botón ⇆/⇅ (para todas las hojas)
+        self.dragger = ResultsDragger(self.result_tabs.tabBar(), splitter)
+        self.apply_results_position(placement.position)
+        placement.changed.connect(self.apply_results_position)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 8, 6, 4)
@@ -127,6 +148,16 @@ class SheetWidget(QWidget):
             sc = QShortcut(QKeySequence(seq), self)
             sc.setContext(Qt.WidgetWithChildrenShortcut)
             sc.activated.connect(slot)
+
+    def apply_results_position(self, position):
+        right = position == "right"
+        if (self.splitter.orientation() == Qt.Horizontal) != right:
+            self.splitter.setOrientation(Qt.Horizontal if right else Qt.Vertical)
+            size = self.splitter.width() if right else self.splitter.height()
+            self.splitter.setSizes([size // 2, size - size // 2] if right else [size * 2 // 5, size - size * 2 // 5])
+        self.side_btn.setText("⇅" if right else "⇆")
+        self.side_btn.setToolTip("Resultados abajo" if right else "Resultados a la derecha"
+                                 "  (también puedes arrastrar la pestaña Resultados)")
 
     def set_running(self, running, text=""):
         """Mientras corre, los resultados anteriores quedan tapados por "Ejecutando…" (no se pueden editar)."""

@@ -19,6 +19,11 @@ def isolated_font_zoom(monkeypatch):
     monkeypatch.setattr(font_zoom, "_load", lambda: dict(store))
     monkeypatch.setattr(font_zoom, "_save", store.update)
     monkeypatch.setattr(font_zoom, "_size", None)
+    from minisql.ui.results_dock import placement  # lado de los resultados: igual, en memoria
+    places = {}
+    monkeypatch.setattr(placement, "_load", lambda: dict(places))
+    monkeypatch.setattr(placement, "_save", places.update)
+    monkeypatch.setattr(placement, "_position", None)
 
 
 @pytest.fixture(scope="session")

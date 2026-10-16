@@ -118,6 +118,36 @@ def latest_release(current=__version__, include_prerelease=False, releases=None)
     return best
 
 
+def notes_between(releases, after, upto, include_prerelease=False):
+    """Las notas de las versiones publicadas entre `after` (sin incluir) y `upto` (incluida), de la más nueva a
+    la más vieja: [(versión, fecha AAAA-MM-DD, notas, página)]. after=None: todas hasta upto."""
+    out = []
+    for r in releases or []:
+        version = (r.get("tag_name") or "").lstrip("vV")
+        if r.get("draft") or version_key(version) is None:
+            continue
+        if r.get("prerelease") and not include_prerelease and version != upto:
+            continue
+        if (after and not is_newer(version, after)) or is_newer(version, upto):
+            continue
+        out.append((version, (r.get("published_at") or "")[:10], (r.get("body") or "").strip(),
+                    r.get("html_url") or RELEASES_PAGE))
+    out.sort(key=lambda e: version_key(e[0]), reverse=True)
+    return out
+
+
+def changelog_markdown(entries):
+    """Las notas de varias versiones en un solo texto Markdown (para la ventana "Novedades")."""
+    if not entries:
+        return "Sin notas de versión."
+    parts = []
+    for version, date, notes, _page in entries:
+        notes = notes.replace("## Cambios", "").strip()       # el título ya lo pone cada versión
+        head = f"## MiniSQL {version}" + (f"  ·  {date}" if date else "")
+        parts.append(f"{head}\n\n{notes or '_Sin notas._'}")
+    return "\n\n".join(parts)
+
+
 def should_check(settings, now=None):
     """¿Toca la revisión automática? settings: el dict "updates" de config.json."""
     if not settings.get("auto", True):

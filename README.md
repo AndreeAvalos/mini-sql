@@ -76,6 +76,9 @@ de las pestañas: **Novedades**, **Actualizar** u **Omitir esta versión**. Al a
 3. Reinicia por el cierre normal: si hay cambios sin confirmar o sin guardar te pregunta antes, y las hojas se
    guardan y se recuperan al abrir. Si eliges «más tarde», se instala la próxima vez que cierres MiniSQL.
 
+Al abrir la versión nueva se muestra una ventana con las **novedades** de todas las versiones desde la que
+tenías (se arman solas con los mensajes de commit).
+
 La versión anterior queda como `MiniSQL.old.exe`: el menú **⋯** (junto a «+ Conexión») tiene «Volver a la versión
 anterior», además de «Buscar actualizaciones», «Buscar actualizaciones al abrir», «Incluir versiones de prueba» y
 «Acerca de». Sin internet, o si la red bloquea GitHub, no pasa nada: se puede descargar a mano. La revisión solo

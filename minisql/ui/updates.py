@@ -8,12 +8,52 @@ import time
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox, QProgressDialog, QToolButton
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QDialogButtonBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QProgressDialog,
+    QTextBrowser,
+    QToolButton,
+    QVBoxLayout,
+)
 
 from .. import __version__, update
 from ..config import UPDATES_DIR, load_settings, save_settings
 from .style import WARN_COLOR
 from .workers import TaskRunner
+
+
+class WhatsNewDialog(QDialog):
+    """Las novedades de una o varias versiones (las notas de cada release de GitHub)."""
+
+    def __init__(self, title, intro, markdown, page, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(660, 520)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        head = QLabel(intro)
+        head.setWordWrap(True)
+        head.setStyleSheet("font-size: 12pt; font-weight: 600;")
+        layout.addWidget(head)
+        self.text = QTextBrowser()
+        self.text.setOpenExternalLinks(True)
+        self.text.document().setDocumentMargin(14)
+        self.text.setMarkdown(markdown)
+        layout.addWidget(self.text, 1)
+        buttons = QDialogButtonBox()
+        all_versions = buttons.addButton("Ver todas en GitHub", QDialogButtonBox.ActionRole)
+        all_versions.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(page)))
+        close = buttons.addButton("Cerrar", QDialogButtonBox.AcceptRole)
+        close.setDefault(True)
+        buttons.accepted.connect(self.accept)
+        layout.addWidget(buttons)
 
 
 class UpdateBanner(QFrame):
@@ -58,6 +98,7 @@ class UpdateManager(QObject):
         self.runner = TaskRunner(self)
         self.banner = UpdateBanner(self)
         self.release = None             # la versión nueva encontrada
+        self.releases = []              # lo que respondió GitHub (para juntar las novedades de varias versiones)
         self.pending = None             # ("install", ruta) o ("rollback", None): se aplica al cerrar
         self.restart = False            # reabrir la app después de aplicar lo pendiente
         self.checking = False
@@ -84,6 +125,7 @@ class UpdateManager(QObject):
             if last and update.is_newer(__version__, last):
                 self.window.statusBar().showMessage(
                     f"MiniSQL se actualizó a la versión {__version__} (antes {last}).", 20000)
+                self.show_whats_new(last)
             self._set(last_run_version=__version__)
         update.clean_downloads(self.downloads)
         if update.should_check(self.settings):
@@ -95,10 +137,15 @@ class UpdateManager(QObject):
             return
         self.checking = True
         prerelease = bool(self.settings.get("prerelease"))
-        self.runner.run(lambda: update.latest_release(__version__, prerelease, self._releases()),
-                        lambda r: self._checked(r, manual), lambda msg: self._check_failed(msg, manual))
 
-    def _checked(self, release, manual):
+        def fetch():
+            releases = self._releases()
+            return update.latest_release(__version__, prerelease, releases), releases
+
+        self.runner.run(fetch, lambda r: self._checked(r, manual), lambda msg: self._check_failed(msg, manual))
+
+    def _checked(self, result, manual):
+        release, self.releases = result
         self.checking = False
         self._set(last_check=time.time())
         if release is None:
@@ -118,17 +165,36 @@ class UpdateManager(QObject):
 
     # --- acciones del aviso
     def show_notes(self):
-        if not self.release:
+        """Novedades de la versión disponible y de las intermedias que te saltarías."""
+        release = self.release
+        if not release:
             return
-        box = QMessageBox(self.window)
-        box.setWindowTitle(f"Novedades de MiniSQL {self.release.version}")
-        box.setTextFormat(Qt.MarkdownText)
-        box.setText(self.release.notes.strip() or "Sin notas de versión.")
-        page = box.addButton("Abrir en GitHub", QMessageBox.ActionRole)
-        box.addButton(QMessageBox.Close)
-        box.exec()
-        if box.clickedButton() is page:
-            QDesktopServices.openUrl(QUrl(self.release.page))
+        entries = update.notes_between(self.releases, __version__, release.version, release.prerelease)
+        if not entries:                  # sin la lista completa: al menos las de esa versión
+            entries = [(release.version, "", release.notes, release.page)]
+        n = len(entries)
+        intro = (f"Qué trae MiniSQL {release.version}" if n == 1
+                 else f"Qué cambió en las {n} versiones desde la tuya ({__version__})")
+        self._open_whats_new(f"Novedades de MiniSQL {release.version}", intro, entries)
+
+    def show_whats_new(self, previous):
+        """Al abrir una versión recién instalada: lo que cambió desde `previous`, desde GitHub (en un hilo; sin
+        red no se muestra nada)."""
+        def ok(releases):
+            entries = update.notes_between(releases, previous, __version__, include_prerelease=True)
+            if entries:
+                self._open_whats_new(f"MiniSQL se actualizó a {__version__}",
+                                     f"¡Listo! Ahora tienes MiniSQL {__version__}. Esto es lo nuevo:", entries)
+
+        self.runner.run(self._releases, ok, lambda _msg: None)
+
+    def _open_whats_new(self, title, intro, entries):
+        if QApplication.activeModalWidget() is not None:          # p. ej. pidiendo la contraseña al abrir
+            QTimer.singleShot(1000, lambda: self._open_whats_new(title, intro, entries))
+            return
+        self.whats_new = WhatsNewDialog(title, intro, update.changelog_markdown(entries), update.RELEASES_PAGE,
+                                        self.window)
+        self.whats_new.exec()
 
     def skip(self):
         if self.release:

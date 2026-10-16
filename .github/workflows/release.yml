@@ -90,11 +90,16 @@ jobs:
             dist/MiniSQL.exe.sha256
           if-no-files-found: error
 
+      - name: Notas de la versión (los commits desde la versión anterior; la app las muestra en "Novedades")
+        if: env.TAG != ''
+        run: python packaging/release_notes.py "${{ inputs.ref || github.sha }}" dist/notas.md
+
       - name: Publicar en Releases
         if: env.TAG != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
+          body_path: dist/notas.md
           target_commitish: ${{ inputs.ref || github.sha }}   # la etiqueta nueva apunta al commit compilado
           files: |
             dist/MiniSQL.exe

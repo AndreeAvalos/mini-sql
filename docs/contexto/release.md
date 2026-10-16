@@ -37,6 +37,7 @@
   last_run_version.
 - Instalar = `restart_now()` → `window.close()` (todas las confirmaciones de siempre) → `closeEvent` guarda la
   sesión → `updates.on_exit()` instala → `app.main` suelta el candado de instancia única y `relaunch`.
+- Novedades: release.yml arma las notas con `packaging/release_notes.py` (mensajes de commit desde la etiqueta anterior, sin `[CI]` ni "Versión X" ni merges) → `body_path`. En la app, `update.notes_between` + `changelog_markdown` juntan varias versiones; `WhatsNewDialog` se abre al iniciar una versión recién instalada (`start` → `show_whats_new(last_run_version)`, espera a que no haya otra ventana modal) y desde el botón Novedades del aviso (lo acumulado desde tu versión). Pruebas: `tests/test_whats_new.py`.
 - Pruebas: `tests/test_update.py` (urlopen simulado, `tmp_path`, fábrica `updates=` de MainWindow).
 
 ## Publicar una versión

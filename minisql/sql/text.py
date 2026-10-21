@@ -279,6 +279,46 @@ _WHERE_OR_PAREN = re.compile(r"\(|\)|\bWHERE\b", re.I)
 _NOT_A_CHANGE_AFTER = {"FOR", "ON", "BEFORE", "AFTER", "OR", "OF", "INSTEAD", "EACH"}
 
 
+# ---------------------------------------------------------------- qué hizo una sentencia (para mostrarlo)
+
+_DML_VERBS = {"UPDATE": "actualizada", "DELETE": "eliminada", "INSERT": "insertada", "MERGE": "combinada"}
+_DDL_VERBS = {"CREATE": "creado", "ALTER": "modificado", "DROP": "eliminado"}
+# objeto → (nombre, femenino)
+_OBJECTS = {
+    "TABLE": ("Tabla", True), "VIEW": ("Vista", True), "MATERIALIZED VIEW": ("Vista materializada", True),
+    "INDEX": ("Índice", False), "SEQUENCE": ("Secuencia", True), "PROCEDURE": ("Procedimiento", False),
+    "FUNCTION": ("Función", True), "PACKAGE": ("Paquete", False), "PACKAGE BODY": ("Cuerpo del paquete", False),
+    "TRIGGER": ("Trigger", False), "SYNONYM": ("Sinónimo", False), "TYPE": ("Tipo", False),
+    "TYPE BODY": ("Cuerpo del tipo", False), "USER": ("Usuario", False), "ROLE": ("Rol", False),
+    "DATABASE LINK": ("Database link", False), "DIRECTORY": ("Directorio", False),
+}
+_DDL_TARGET = re.compile(
+    r"^\s*(CREATE|ALTER|DROP)\s+(?:OR\s+REPLACE\s+)?(?:(?:NON)?EDITIONABLE\s+|GLOBAL\s+TEMPORARY\s+|PRIVATE\s+"
+    r"TEMPORARY\s+|PUBLIC\s+|UNIQUE\s+|BITMAP\s+)*(MATERIALIZED\s+VIEW|PACKAGE\s+BODY|TYPE\s+BODY|DATABASE\s+LINK|"
+    r"\w+)\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?(\"[^\"]+\"|[\w$#]+(?:\.(?:\"[^\"]+\"|[\w$#]+))?)", re.I)
+
+
+def result_message(sql: str, kw: str, rowcount: int = 0) -> str:
+    """Qué hizo una sentencia que no devuelve filas, como lo diría una persona: "3 filas actualizadas",
+    "Tabla CLIENTES_TMP creada", "Bloque PL/SQL ejecutado"."""
+    if kw in _DML_VERBS:
+        n = max(rowcount or 0, 0)
+        word = _DML_VERBS[kw]
+        return f"{n} fila {word}" if n == 1 else f"{n} filas {word[:-1]}as"
+    m = _DDL_TARGET.match(strip_comments(sql))
+    if m and " ".join(m.group(2).upper().split()) in _OBJECTS:
+        noun, feminine = _OBJECTS[" ".join(m.group(2).upper().split())]
+        verb = _DDL_VERBS[m.group(1).upper()]
+        return f"{noun} {m.group(3)} {verb[:-1] + 'a' if feminine else verb}"
+    return {
+        "CREATE": "Objeto creado", "ALTER": "Objeto modificado", "DROP": "Objeto eliminado",
+        "TRUNCATE": "Tabla vaciada (TRUNCATE)", "RENAME": "Objeto renombrado", "GRANT": "Permisos otorgados",
+        "REVOKE": "Permisos revocados", "COMMENT": "Comentario guardado", "BEGIN": "Bloque PL/SQL ejecutado",
+        "DECLARE": "Bloque PL/SQL ejecutado", "CALL": "Procedimiento ejecutado", "COMMIT": "Commit realizado",
+        "ROLLBACK": "Rollback realizado", "SAVEPOINT": "Savepoint creado",
+    }.get(kw, "Ejecutado correctamente")
+
+
 def changes_without_where(sql: str):
     """DELETE y UPDATE que afectan TODAS las filas porque no tienen WHERE propio. Revisa también los que
     están dentro de bloques PL/SQL (BEGIN … END) y no se deja engañar por un WHERE dentro de un subquery,

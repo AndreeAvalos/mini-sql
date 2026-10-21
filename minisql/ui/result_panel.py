@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QSizePolicy,
+    QStackedWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -29,6 +30,7 @@ from .busy_overlay import BusyOverlay
 from .results import EditableResultModel, ResultModel, ResultView
 from .save_preview import SavePreviewDialog
 from .style import ERROR_COLOR, MUTED_COLOR, OK_COLOR, WARN_COLOR
+from .theme import tokens
 
 
 def _button(text, tip, slot):
@@ -38,6 +40,40 @@ def _button(text, tip, slot):
     b.setAutoRaise(True)
     b.clicked.connect(slot)
     return b
+
+
+class ResultMessage(QWidget):
+    """Lo que hizo una sentencia que no trae filas ("3 filas actualizadas") o su error, grande y en el lugar
+    de la tabla: ahí es donde se mira después de ejecutar."""
+
+    def __init__(self):
+        super().__init__()
+        self.icon = QLabel()
+        self.icon.setAlignment(Qt.AlignCenter)
+        self.title = QLabel()
+        self.detail = QLabel()
+        self.detail.setObjectName("muted")
+        for label in (self.title, self.detail):
+            label.setWordWrap(True)
+            label.setAlignment(Qt.AlignCenter)
+            label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        box = QVBoxLayout(self)
+        box.setContentsMargins(24, 16, 24, 16)
+        box.addStretch(1)
+        box.addWidget(self.icon)
+        box.addWidget(self.title)
+        box.addWidget(self.detail)
+        box.addStretch(2)
+
+    def set_message(self, title, detail="", error=False):
+        colors = tokens()
+        color = colors["danger"] if error else colors["success"]
+        self.icon.setText("✖" if error else "✔")
+        self.icon.setStyleSheet(f"color: {color}; font-size: 26pt;")
+        self.title.setStyleSheet(f"font-size: 13pt; font-weight: 600; color: {color if error else colors['text']};")
+        self.title.setText(title)
+        self.detail.setText(detail)
+        self.detail.setVisible(bool(detail))
 
 
 class ResultPanel(QWidget):
@@ -104,7 +140,11 @@ class ResultPanel(QWidget):
         layout.setContentsMargins(0, 2, 0, 0)
         layout.setSpacing(2)
         layout.addLayout(bar)
-        layout.addWidget(self.view, 1)
+        self.message = ResultMessage()                    # en lugar de la tabla: "3 filas actualizadas" o el error
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self.view)
+        self.stack.addWidget(self.message)
+        layout.addWidget(self.stack, 1)
         footer = QHBoxLayout()                             # debajo de la tabla: cuántas filas y las páginas
         footer.setContentsMargins(4, 0, 0, 0)
         footer.addWidget(self.count)
@@ -175,8 +215,26 @@ class ResultPanel(QWidget):
     def model(self):
         return self.view.model()
 
+    def _show_filter(self, visible):
+        self.filter_edit.setVisible(visible)
+        self.filter_column.setVisible(visible)
+
+    def show_message(self, title, detail="", error=False):
+        """Una sentencia sin filas (UPDATE, DDL, PL/SQL…) o un error: se muestra en lugar de la tabla anterior."""
+        self._close_stream()
+        self.target = None
+        self.view.setModel(ResultModel([], [], self.view.theme, PAGE_ROWS))
+        self._set_state("", "")
+        self.message.set_message(title, detail, error)
+        self.stack.setCurrentWidget(self.message)
+        self._show_filter(False)                         # sin tabla no hay nada que filtrar
+        self._update_buttons()
+        self._update_count()
+
     def show_result(self, res, sql=None):
         """Muestra el resultado de una consulta. Si trae ROWID y es de una sola tabla, se puede editar."""
+        self.stack.setCurrentWidget(self.view)
+        self._show_filter(True)
         headers, rows = res["headers"], res["rows"]
         target, reason = editable_target(sql) if sql else (None, None)
         self._close_stream()

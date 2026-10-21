@@ -40,6 +40,9 @@ Pruebas: `tests/test_grid.py`, `test_results.py`. Captura: `docs/img/edicion.png
 - Tras Guardar, `ConnectionTab.transaction_ended("Commit"|"Rollback")` cambia el aviso "pendiente de Commit".
 - Pruebas: `tests/test_paging.py` (BIG_TABLE de 450 filas en FakeCursor).
 
+## Mensaje en lugar de la tabla
+- Sentencias sin filas y errores: `ResultPanel.show_message(título, detalle, error)` muestra `ResultMessage` en el `stack` (✔ "3 filas actualizadas" · tiempo · pendiente de Commit, o ✖ el error) y oculta el filtro; `show_result` vuelve a la tabla. El texto sale de `sql.text.result_message`. Pruebas: `tests/test_result_message.py`.
+
 ## Ocupado
 - `ResultPanel.set_busy(texto, on_cancel)` muestra `BusyOverlay` (ui/busy_overlay.py) encima del panel al ejecutar, guardar, traer filas o cargar Datos; deshabilita tabla y filtro y `_editable_model()` devuelve None (ni atajos ni menú). `set_busy(None)` lo quita.
 

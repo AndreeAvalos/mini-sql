@@ -16,7 +16,7 @@ import oracledb
 
 from ..config import MAX_OUTPUT_LINES, PAGE_ROWS
 from ..sql.editable import rowid_query
-from ..sql.text import DDL, DML, blank_literals, first_keyword
+from ..sql.text import DDL, DML, blank_literals, first_keyword, result_message
 from .grid import apply_changes
 
 
@@ -303,8 +303,6 @@ class OracleSession:
         message = f"{total} sentencias ejecutadas"
         if changed:
             message += f" · {changed} filas afectadas"
-        if txn:
-            message += " (pendiente de Commit)"
         res = dict(grid or {})
         res.update(message=message, script=total, txn=txn, elapsed=time.perf_counter() - t0,
                    kw=next((k for k in kws if k in DDL), kws[-1]))
@@ -357,11 +355,7 @@ class OracleSession:
                 "rows": rows,
                 "more": len(rows) == PAGE_ROWS,       # puede haber más (se sabe al pedir la página siguiente)
             }
-        if kw in DML:
-            return {"message": f"{cur.rowcount} filas afectadas (pendiente de Commit)"}
-        if kw in DDL:
-            return {"message": "Sentencia DDL ejecutada"}
-        return {"message": "Ejecutado correctamente"}
+        return {"message": result_message(sql, kw, cur.rowcount if kw in DML else 0)}
 
     def _enable_output(self, cur):
         if not self.output_enabled:

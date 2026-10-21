@@ -351,10 +351,18 @@ class SheetWidget(QWidget):
             self.set_status(f"{script}{len(res['rows'])} filas{more}  ·  {res['elapsed']:.2f} s")
         else:
             self.set_status(f"{res['message']}  ·  {res['elapsed']:.2f} s")
+            detail = [f"{res['elapsed']:.2f} s"]
+            if res.get("txn"):
+                detail.append("pendiente de Commit")
+            self.results.show_message(res["message"], "  ·  ".join(detail))
 
     def on_error(self, msg):
         self.set_running(False)
         self.conn_tab.refresh_pending()             # en un script, las sentencias anteriores sí se ejecutaron
         if self.last_output:
             self.result_tabs.setCurrentWidget(self.output)
+        else:
+            self.result_tabs.setCurrentWidget(self.results)
         self.set_status(msg, error=True)
+        first, _, rest = msg.strip().partition("\n")
+        self.results.show_message(first, rest.strip(), error=True)

@@ -6,7 +6,7 @@ import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QMessageBox
 
-from minisql.db.grid import ColumnInfo, apply_changes, parse_value, preview_sql, sql_literal
+from minisql.db.grid import ColumnInfo, apply_changes, fetch_key_columns, parse_value, preview_sql, sql_literal
 from minisql.sql.editable import editable_target, rowid_query
 from minisql.ui import result_panel as panel_module
 from minisql.ui import sheet as sheet_module
@@ -174,7 +174,7 @@ def test_edit_validate_save_and_cancel(app, editable_sheet, monkeypatch):
     panel.save()
     stmts, summary = shown[0]
     assert summary["borradas"] == 1 and len(stmts) == 3
-    assert stmts[0] == "UPDATE SCOTT.EMP\n   SET A = 12.5\n WHERE ROWID = 'ROW1';"
+    assert stmts[0] == "UPDATE SCOTT.EMP\n   SET A = 12.5\n WHERE A = 1;"        # por la clave (valor original)
     assert wait_until(app, lambda: "Guardado" in panel.state.text()), panel.state.text()
     dml = [s.strip().lower() for s in FakeCursor.executed]
     assert dml[0] == "savepoint minisql_grilla"
@@ -286,3 +286,55 @@ def test_commit_or_rollback_clears_the_pending_message(app, editable_sheet, monk
     assert wait_until(app, lambda: "pendiente de Commit" in panel.state.text())
     assert tab.rollback()
     assert "Rollback" in panel.state.text() and "pendiente" not in panel.state.text()
+
+
+# ---------------------------------------------------------------- el script del guardado, por clave
+
+class KeyCursor:
+    """Responde las consultas de fetch_key_columns: restricciones primero, índices únicos después."""
+
+    def __init__(self, constraints, indexes=()):
+        self.answers = [list(constraints), list(indexes)]
+
+    def execute(self, sql, **_kw):
+        self.current = self.answers.pop(0) if self.answers else []
+
+    def fetchall(self):
+        return self.current
+
+
+def test_key_columns_prefer_primary_then_not_null_unique():
+    assert fetch_key_columns(KeyCursor([("P", "PK", "ID", "N"), ("U", "UK", "CODIGO", "N")]), "S", "T") == \
+        ("P", ["ID"])
+    unique = [("U", "UK_LARGA", "A", "N"), ("U", "UK_LARGA", "B", "N"), ("U", "UK_CORTA", "CODIGO", "N")]
+    assert fetch_key_columns(KeyCursor(unique), "S", "T") == ("U", ["CODIGO"])     # la más corta
+    nullable = [("U", "UK", "CORREO", "Y")]                                        # con NULL no identifica
+    assert fetch_key_columns(KeyCursor(nullable), "S", "T") == (None, [])
+    index = [("U", "IX_U", "SERIE", "N"), ("U", "IX_U", "NUMERO", "N")]           # índice único, sin restricción
+    assert fetch_key_columns(KeyCursor([], index), "S", "T") == ("U", ["SERIE", "NUMERO"])
+    assert fetch_key_columns(KeyCursor([], []), "S", "T") == (None, [])
+
+
+def test_preview_uses_the_key_and_falls_back_to_rowid():
+    ops = [("update", "R1", {"NOMBRE": "x"}), ("delete", "R2"), ("delete", "R3")]
+    keys = {"R1": {"SERIE": "A", "NUMERO": 7}, "R2": {"SERIE": "B", "NUMERO": None}}
+    update, delete, no_key = preview_sql("S", "T", ops, keys)
+    assert update.endswith("WHERE SERIE = 'A'\n   AND NUMERO = 7;")
+    assert delete.endswith("WHERE SERIE = 'B'\n   AND NUMERO IS NULL;")
+    assert no_key.endswith("WHERE ROWID = 'R3';")
+
+
+def test_key_must_be_in_the_query_to_be_used(app, monkeypatch):
+    tab = ConnectionTab(make_session(FakeConn()), "T", "PROD")
+    sheet = tab.current_sheet()
+    sheet.editor.setPlainText("select b from emp")                       # sin A, que es la clave
+    sheet.run()
+    assert wait_until(app, lambda: sheet.results.target is not None)
+    panel = sheet.results
+    model = panel.model
+    assert model.key_columns == ["A"] and model.key_values() == {}
+    shown = []
+    monkeypatch.setattr(panel, "confirm_save", lambda stmts, summary: shown.append(stmts) or False)
+    assert model.setData(model.index(0, 1), "y")                         # B (A no es de la consulta)
+    panel.save()
+    assert "WHERE ROWID = 'ROW1'" in shown[0][0]                         # sin la clave: por ROWID

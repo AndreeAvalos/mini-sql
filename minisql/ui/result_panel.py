@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from ..config import MAX_ROWS, PAGE_ROWS
 from ..db.catalog import resolve_object
-from ..db.grid import fetch_columns_info, preview_sql
+from ..db.grid import fetch_columns_info, fetch_key_columns, preview_sql
 from ..sql.editable import editable_target
 from .busy_overlay import BusyOverlay
 from .results import EditableResultModel, ResultModel, ResultView
@@ -270,7 +270,7 @@ class ResultPanel(QWidget):
             owner, name, otype = found
             if otype != "TABLE":
                 return None, f"{owner}.{name} es {otype.lower()}, no una tabla"
-            return (owner, name, fetch_columns_info(cur, owner, name)), None
+            return (owner, name, fetch_columns_info(cur, owner, name), fetch_key_columns(cur, owner, name)), None
 
         def ok(result):
             found, reason = result
@@ -279,7 +279,7 @@ class ResultPanel(QWidget):
             if not found:
                 self._set_state(f"🔒 Solo lectura: {reason}", MUTED_COLOR)
                 return
-            owner, name, columns = found
+            owner, name, columns, (model.key_kind, model.key_columns) = found
             model.set_columns([columns.get(target.source_of(h, columns) or "") for h in model.headers])
             if model.editable:
                 self.target = (owner, name)
@@ -481,7 +481,9 @@ class ResultPanel(QWidget):
             return
         summary = model.summary()
         owner, table = self.target
-        if not self.confirm_save(preview_sql(owner, table, ops), summary):
+        keys = model.key_values()
+        self.save_key = (model.key_kind, model.key_columns) if keys else (None, [])
+        if not self.confirm_save(preview_sql(owner, table, ops, keys), summary):
             return
         self.saving = True
         self.set_busy("Guardando…")
@@ -508,7 +510,8 @@ class ResultPanel(QWidget):
 
     def confirm_save(self, statements, summary):
         """Muestra las sentencias que se van a ejecutar y devuelve True si el usuario confirma."""
-        dialog = SavePreviewDialog(".".join(self.target), statements, summary, self)
+        dialog = SavePreviewDialog(".".join(self.target), statements, summary, self,
+                                   key=getattr(self, "save_key", (None, [])))
         return dialog.exec() == QDialog.Accepted
 
     def _transaction_ended(self, how):

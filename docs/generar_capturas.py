@@ -70,6 +70,8 @@ class DemoCursor(FakeCursor):
 
     def fetchall(self):
         q = self.sql
+        if "from all_constraints k" in q:        # CLIENTES tiene clave primaria ID
+            return [("P", "PK_CLIENTES", "ID", "N")]
         if "from all_tab_cols" in q:             # definición de CLIENTES para la grilla editable
             return [("ID", "NUMBER", 22, 10, 0, 0, None, "N", "NO", "NO", None),
                     ("NOMBRE", "VARCHAR2", 120, None, None, 120, "C", "N", "NO", "NO", None),
@@ -158,8 +160,8 @@ def main():
 
     # 1c. Confirmación al guardar: las sentencias que se van a ejecutar
     owner, table = sheet.results.target
-    dialog = SavePreviewDialog(f"{owner}.{table}", preview_sql(owner, table, model.pending_ops()),
-                               model.summary(), w)
+    dialog = SavePreviewDialog(f"{owner}.{table}", preview_sql(owner, table, model.pending_ops(), model.key_values()),
+                               model.summary(), w, key=(model.key_kind, model.key_columns))
     dialog.show()
     pump(app, 10)
     save(dialog, "guardar.png")

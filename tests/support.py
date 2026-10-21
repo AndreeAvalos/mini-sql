@@ -131,6 +131,8 @@ class FakeCursor:
             kinds = {"EMP": "TABLE", "DEPT": "TABLE", "BIG_TABLE": "TABLE", "S_EMP": "SYNONYM", "PKG": "PACKAGE",
                      "SEQ": "SEQUENCE"}
             return [(kinds[n],)] if n in kinds and self.kw["own"] == "SCOTT" else []
+        if "from all_constraints k" in q and self.kw.get("tab") in ("EMP", "BIG_TABLE"):
+            return [("P", "PK_EMP", "A", "N")]                          # la grilla: A es la clave primaria
         if q.lstrip().startswith("select cc.column_name from all_cons_columns"):
             return [("ID",)]
         if "all_col_comments" in q:

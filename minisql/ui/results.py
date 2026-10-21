@@ -488,6 +488,22 @@ class EditableResultModel(ResultModel):
         deleted = sum(1 for r in self.all_rows if r.deleted)
         return {"modificadas": changed, "nuevas": new, "borradas": deleted}
 
+    key_kind, key_columns = None, []          # clave de la tabla (db.grid.fetch_key_columns), si se conoce
+
+    def key_values(self):
+        """{rowid: {columna clave: valor original}} para escribir el script por clave y no por ROWID. Vacío si la
+        tabla no tiene clave o la consulta no trae todas sus columnas."""
+        positions = {}
+        for key in self.key_columns:
+            i = next((i for i, c in enumerate(self.columns) if c is not None and c.name == key), None)
+            if i is None:
+                return {}
+            positions[key] = i
+        if not positions:
+            return {}
+        return {row.rowid: {k: row.original[i] for k, i in positions.items()}
+                for row in self.all_rows if not row.new and row.rowid}
+
     def pending_ops(self):
         """Operaciones para guardar (ver db.grid.apply_changes). Revisa antes lo que Oracle rechazaría
         seguro (obligatorias vacías en filas nuevas) y lanza ValueError con todos los problemas."""

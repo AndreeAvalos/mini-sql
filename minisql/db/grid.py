@@ -214,17 +214,63 @@ def sql_literal(value):
     return str(value)
 
 
-def preview_sql(owner, table, ops):
-    """Las sentencias que hará apply_changes, con los valores a la vista, para confirmarlas antes de guardar."""
+def fetch_key_columns(cur, owner, table):
+    """Cómo identificar una fila sin el ROWID: ("P", [columnas]) la clave primaria; si no hay, ("U", [columnas]) la
+    clave o el índice único más corto con todas sus columnas NOT NULL (si no, dos filas con NULL serían iguales);
+    si no hay ninguno, (None, [])."""
+    cur.execute("""
+        select k.constraint_type, k.constraint_name, cc.column_name, t.nullable
+          from all_constraints k
+          join all_cons_columns cc on cc.owner = k.owner and cc.constraint_name = k.constraint_name
+                                  and cc.table_name = k.table_name
+          join all_tab_cols t on t.owner = cc.owner and t.table_name = cc.table_name and t.column_name = cc.column_name
+         where k.owner = :own and k.table_name = :tab and k.constraint_type in ('P', 'U') and k.status = 'ENABLED'
+         order by k.constraint_type, k.constraint_name, cc.position""", own=owner, tab=table)
+    keys = {}
+    for ctype, name, column, nullable in cur.fetchall():
+        keys.setdefault((ctype, name), []).append((column, nullable))
+    if not any(ctype == "P" for ctype, _ in keys):
+        cur.execute("""
+            select 'U', i.index_name, ic.column_name, t.nullable
+              from all_indexes i
+              join all_ind_columns ic on ic.index_owner = i.owner and ic.index_name = i.index_name
+              join all_tab_cols t on t.owner = i.table_owner and t.table_name = i.table_name
+                                 and t.column_name = ic.column_name
+             where i.table_owner = :own and i.table_name = :tab and i.uniqueness = 'UNIQUE'
+             order by i.index_name, ic.column_position""", own=owner, tab=table)
+        for ctype, name, column, nullable in cur.fetchall():
+            keys.setdefault((ctype, name), []).append((column, nullable))
+    primary = [cols for (ctype, _), cols in keys.items() if ctype == "P"]
+    if primary:
+        return "P", [c for c, _ in primary[0]]
+    unique = [cols for (ctype, _), cols in keys.items() if ctype == "U" and all(n == "N" for _, n in cols)]
+    if unique:
+        return "U", [c for c, _ in min(unique, key=len)]
+    return None, []
+
+
+def _where(rowid, keys):
+    """WHERE de una fila: por su clave (valores originales) si se conocen, o por el ROWID."""
+    key = (keys or {}).get(rowid)
+    if not key:
+        return f"ROWID = '{rowid}'"
+    return "\n   AND ".join(f"{q(c)} = {sql_literal(v)}" if v is not None else f"{q(c)} IS NULL"
+                           for c, v in key.items())
+
+
+def preview_sql(owner, table, ops, keys=None):
+    """Las sentencias que hará apply_changes, con los valores a la vista, para confirmarlas antes de guardar.
+    keys: {rowid: {columna clave: valor original}}: así el script identifica las filas por su clave (sirve para
+    correrlo en otra base) y no por el ROWID, que solo vale en esta."""
     target = f"{q(owner)}.{q(table)}"
     out = []
     for op in ops:
         if op[0] == "update":
             _, rowid, values = op
             sets = ",\n       ".join(f"{q(c)} = {sql_literal(v)}" for c, v in values.items())
-            out.append(f"UPDATE {target}\n   SET {sets}\n WHERE ROWID = '{rowid}';")
+            out.append(f"UPDATE {target}\n   SET {sets}\n WHERE {_where(rowid, keys)};")
         elif op[0] == "delete":
-            out.append(f"DELETE FROM {target}\n WHERE ROWID = '{op[1]}';")
+            out.append(f"DELETE FROM {target}\n WHERE {_where(op[1], keys)};")
         elif op[0] == "insert":
             values = op[1]
             cols = ", ".join(q(c) for c in values)

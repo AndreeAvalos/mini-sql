@@ -18,7 +18,9 @@ class SavePreviewDialog(QDialog):
     """target: "OWNER.TABLA"; statements: textos de db.grid.preview_sql;
     summary: dict de EditableResultModel.summary."""
 
-    def __init__(self, target, statements, summary, parent=None):
+    def __init__(self, target, statements, summary, parent=None, key=(None, [])):
+        """key: (tipo, columnas) con que el script identifica las filas: "P" clave primaria, "U" clave única,
+        None: el ROWID."""
         super().__init__(parent)
         self.setWindowTitle(f"Guardar cambios en {target}")
         self.resize(760, 480)
@@ -39,9 +41,17 @@ class SavePreviewDialog(QDialog):
         self.highlighter = SqlHighlighter(self.text.document(), dark=is_dark(self))
         layout.addWidget(self.text, 1)
 
-        note = QLabel("Cada fila se identifica por su ROWID y los valores viajan como bind variables. "
-                      "Si una sentencia falla no se guarda ninguna. No se hace Commit: después decides "
-                      "Commit o Rollback.")
+        kind, columns = key
+        if kind:
+            what = "clave primaria" if kind == "P" else "clave única"
+            ident = (f"El script identifica cada fila por su {what} ({', '.join(columns)}) con los valores "
+                     "originales, así sirve para correrlo en otra base. Al guardar aquí MiniSQL ejecuta lo mismo, "
+                     "pero ubica cada fila por su ROWID, que es exacto. ")
+        else:
+            ident = ("La tabla no tiene clave primaria ni única (o la consulta no trae sus columnas): cada fila "
+                     "se identifica por su ROWID. ")
+        note = QLabel(ident + "Los valores viajan como bind variables. Si una sentencia falla no se guarda "
+                      "ninguna. No se hace Commit: después decides Commit o Rollback.")
         note.setWordWrap(True)
         note.setStyleSheet("color: gray;")
         layout.addWidget(note)

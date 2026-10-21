@@ -24,8 +24,12 @@ Pruebas: `tests/test_grid.py`, `test_results.py`. Captura: `docs/img/edicion.png
 - `apply_changes(cur, owner, table, ops)`: `SAVEPOINT minisql_grilla`; UPDATE/DELETE
   `WHERE ROWID = CHARTOROWID(:rid)` con `_expect_one` (la fila debe existir); INSERT con
   `RETURNING ROWIDTOCHAR(ROWID) INTO :rid`. Ante error: `ROLLBACK TO SAVEPOINT` y se relanza.
-- `preview_sql(owner, table, ops)` / `sql_literal(v)`: las mismas sentencias con los valores como literales,
-  **solo para mostrar** (la ejecución sigue con binds). Pruebas: monkeypatch de `panel.confirm_save`.
+- `preview_sql(owner, table, ops, keys)` / `sql_literal(v)`: las mismas sentencias con los valores como literales,
+  **solo para mostrar** (la ejecución sigue con binds y por ROWID). Pruebas: monkeypatch de `panel.confirm_save`.
+- El script identifica las filas por clave, no por ROWID: `fetch_key_columns` (clave primaria; si no, la clave o
+  índice único más corto con columnas NOT NULL; si no, ROWID) se pide en `_load_columns` → `model.key_kind/
+  key_columns`; `model.key_values()` da los valores **originales** de la clave por rowid (vacío si la consulta no
+  trae todas las columnas de la clave → ROWID). La ventana dice qué identificación usa.
 
 ## Paginación
 - `OracleSession.execute` trae solo `PAGE_ROWS` (200, config.py). Si llenó la página, `res["more"]` y

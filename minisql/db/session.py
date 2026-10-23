@@ -43,8 +43,9 @@ class RemoteLobError(Exception):
 
 
 # Errores de una columna LOB (BLOB/CLOB) traída por un dblink: ORA-22992 es el clásico; con el modo thin y los LOB
-# pedidos como bytes/texto, la base remota responde ORA-03149 ("código de error no válido").
-REMOTE_LOB_CODES = ("ORA-03149", "ORA-22992")
+# pedidos como bytes/texto, la base remota responde ORA-03149 ("código de error no válido"). Pedidos como referencia,
+# algunas bases remotas mandan un locator que el modo thin no sabe leer (DPY-5002, "internal error: read integer…").
+REMOTE_LOB_CODES = ("ORA-03149", "ORA-22992", "DPY-5002")
 REMOTE_LOB_HELP = ("La base remota rechazó la consulta y su mensaje no llegó por el dblink. Suele ser:\n"
                    "• una columna BLOB/CLOB que el dblink no deja leer: quítala del SELECT (en vez de *, lista las "
                    "columnas) o trae solo una parte con DBMS_LOB.GETLENGTH(col) o DBMS_LOB.SUBSTR(col, 2000, 1);\n"

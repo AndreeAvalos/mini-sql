@@ -156,6 +156,11 @@ class FakeCursor:
             return [("ALTA",), ("BAJA",)]
         if "object_type = 'table'" in q:
             return [("EMP", "VALID"), ("DEPT", "INVALID")]
+        if "from all_triggers t" in q:                   # triggers de una tabla (explorador)
+            if self.kw.get("tab") != "EMP":
+                return []
+            return [("SCOTT", "EMP_AUD", "DISABLED", "VALID"), ("HR", "EMP_BI", "ENABLED", "VALID"),
+                    ("SCOTT", "EMP_UPD", "ENABLED", "INVALID")]
         if "all_objects" in q:
             return [("OBJ", "VALID")]
         return []

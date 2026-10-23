@@ -25,6 +25,26 @@ def test_explorer_tree(app):
     assert tables.text(0) == "Tablas (1/2)"
 
 
+def test_explorer_shows_table_triggers(app):
+    tab = ConnectionTab(make_session(FakeConn()), "T", "PROD")
+    pump(app)
+    tables = tab.explorer.tree.topLevelItem(0).child(0)
+    tables.setExpanded(True)
+    pump(app)
+    emp, dept = tables.child(0), tables.child(1)
+    emp.setExpanded(True)
+    dept.setExpanded(True)
+    pump(app)
+    folder = emp.child(emp.childCount() - 1)                        # después de las columnas
+    assert folder.text(0) == "Triggers (3)"
+    names = [folder.child(i).text(0) for i in range(folder.childCount())]
+    assert names == ["EMP_AUD  (deshabilitado)", "HR.EMP_BI", "EMP_UPD"]
+    assert folder.child(2).toolTip(0) == "Estado: INVALID"
+    assert all(not dept.child(i).text(0).startswith("Triggers") for i in range(dept.childCount()))
+    tab.explorer.on_double_click(folder.child(1), 0)                  # se abre como cualquier objeto
+    assert tab.sheets.currentWidget().key == ("HR", "EMP_BI", "TRIGGER")
+
+
 def test_object_viewer(app):
     tab = ConnectionTab(make_session(FakeConn()), "T", "PROD")
     viewer = tab.open_object("SCOTT", "EMP", "TABLE")

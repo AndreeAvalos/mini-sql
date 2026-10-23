@@ -74,6 +74,27 @@ def test_remote_errors_get_an_explanation():
     assert "BLOB/CLOB" in text and "no existe" in text and "ORA-03149" in text
 
 
+class LocatorFailsCursor(DblinkCursor):
+    """La referencia remota tampoco se puede leer: el modo thin no entiende el locator que manda el dblink."""
+
+    def fetchmany(self, n):
+        if "@tf052" in self.sql:
+            raise RuntimeError("DPY-5002: internal error: read integer of length 7 when expecting integer of "
+                               "no more than length 4")
+        return super().fetchmany(n)
+
+
+class LocatorFailsConn(FakeConn):
+    def cursor(self):
+        return LocatorFailsCursor()
+
+
+def test_unreadable_remote_locator_gets_an_explanation():
+    with pytest.raises(RemoteLobError) as err:
+        make_session(LocatorFailsConn()).execute("SELECT * FROM WMS_DOCUMENTOS@TF052")
+    assert "BLOB/CLOB" in str(err.value) and "DPY-5002" in str(err.value)
+
+
 def test_only_dblink_queries_are_retried():
     assert remote_lob_error(RuntimeError("ORA-03149: invalid Oracle error code"), "select * from t@link")
     assert not remote_lob_error(RuntimeError("ORA-03149"), "select '@' from t")              # @ en un texto

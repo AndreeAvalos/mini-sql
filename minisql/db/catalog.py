@@ -82,6 +82,19 @@ def list_columns(cur, owner, name):
     return cur.fetchall()
 
 
+def list_table_triggers(cur, owner, table):
+    """[(dueño, trigger, 'ENABLED'/'DISABLED', estado del objeto)] de los triggers de una tabla o vista.
+    El trigger puede ser de otro esquema."""
+    cur.execute("""
+        select t.owner, t.trigger_name, t.status, o.status
+        from all_triggers t
+        left join all_objects o on o.owner = t.owner and o.object_name = t.trigger_name
+                               and o.object_type = 'TRIGGER'
+        where t.table_owner = :own and t.table_name = :tab
+        order by t.trigger_name""", own=owner, tab=table)
+    return cur.fetchall()
+
+
 def list_subprograms(cur, owner, package):
     """Procedimientos y funciones de un paquete, en el orden en que están declarados."""
     cur.execute("""

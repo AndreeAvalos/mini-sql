@@ -23,6 +23,7 @@ from ..db.catalog import (
     list_objects,
     list_schemas,
     list_subprograms,
+    list_table_triggers,
 )
 from ..db.source import fetch_ddl
 from ..sql.text import q
@@ -211,18 +212,40 @@ class ObjectExplorer(QWidget):
         self.start_loading(item)
         owner, name = info["owner"], info["name"]
 
-        def ok(rows):
+        def ok(result):
+            rows, triggers = result
             item.takeChildren()
+            colors = tokens()
             for col, dtype, length, prec, scale, clen, nullable, pk in rows:
                 text = f"{'🔑 ' if pk else ''}{col}   {format_type(dtype, length, prec, scale, clen)}"
                 if nullable == "N":
                     text += "  NOT NULL"
                 it = self.add_item(item, text, {"kind": "column", "owner": owner, "name": col})
-                colors = tokens()
                 it.setForeground(0, QColor(colors["warn"] if pk else colors["muted"]))
+            if triggers:
+                self.add_triggers(item, owner, triggers)
 
-        self.tab.meta_call(lambda cur: list_columns(cur, owner, name), ok,
-                           lambda m: self.show_child_error(item, m))
+        def load(cur):
+            return list_columns(cur, owner, name), list_table_triggers(cur, owner, name)
+
+        self.tab.meta_call(load, ok, lambda m: self.show_child_error(item, m))
+
+    def add_triggers(self, item, table_owner, triggers):
+        """Carpeta "Triggers (N)" debajo de las columnas; cada trigger se abre como cualquier objeto."""
+        folder = self.add_item(item, f"Triggers ({len(triggers)})", {"kind": "folder"})
+        folder.setIcon(0, badge_icon("TRIGGER"))
+        colors = tokens()
+        for trg_owner, trg, enabled, status in triggers:
+            text = trg if trg_owner == table_owner else f"{trg_owner}.{trg}"
+            it = self.add_item(folder, text, {"kind": "object", "owner": trg_owner, "type": "TRIGGER",
+                                              "name": trg})
+            if status and status != "VALID":
+                it.setForeground(0, QColor(ERROR_COLOR))
+                it.setToolTip(0, f"Estado: {status}")
+            elif enabled == "DISABLED":
+                it.setText(0, f"{text}  (deshabilitado)")
+                it.setForeground(0, QColor(colors["muted"]))
+                it.setToolTip(0, "Trigger deshabilitado")
 
     def load_package(self, item, info):
         self.start_loading(item)
@@ -271,7 +294,7 @@ class ObjectExplorer(QWidget):
     def on_double_click(self, item, _col):
         info = self.info(item)
         kind = info.get("kind")
-        if kind in ("schema", "category"):
+        if kind in ("schema", "category", "folder"):
             item.setExpanded(not item.isExpanded())
         elif kind == "object":
             self.tab.open_object(info["owner"], info["name"], info["type"])

@@ -6,7 +6,8 @@ Pruebas: `tests/test_sheet.py`, `test_app.py`, `test_objects.py`, `test_find.py`
 ## Jerarquía
     MainWindow (main_window.py)         pestañas de conexión, atajos globales, closeEvent, restaurar sesión
       ConnectionTab (connection_tab.py) explorador + pestañas de hojas/visores + barra Commit/Rollback
-        ObjectExplorer (explorer.py)    árbol esquema > categoría > objeto, carga perezosa, filtro, menú
+        ObjectExplorer (explorer.py)    árbol esquema > categoría > objeto, carga perezosa, filtro, menú;
+                                        tablas/vistas: columnas + carpeta "Triggers (N)" (list_table_triggers)
         SheetWidget (sheet.py)          editor + ResultPanel + DBMS_OUTPUT + estado
         ObjectViewer (object_viewer.py) pestañas por tipo (OBJECT_TABS); "Código" = CodePage; "Datos" = ResultPanel
 

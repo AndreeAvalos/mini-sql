@@ -51,5 +51,8 @@ falla con `ScriptError`; `on_error` llama `refresh_pending`). 5. `show_running_s
 - `app.py`: `single_instance_lock()` (QLockFile en ~/.minisql/minisql.lock) y `main()`.
 
 ## Reglas
+- Los modelos Qt escritos en Python (`data`, `headerData`, `rowCount`…) nunca lanzan excepciones: Qt puede pedir
+  filas/columnas que ya no existen (p. ej. las del modelo anterior al hacer `setModel`) y una excepción dentro de
+  esa llamada es un segfault con Python 3.10 en Linux (GitHub Actions). Devolver None fuera de rango.
 - Textos de la interfaz en español. Confirmar antes de perder trabajo (hojas, código, grilla).
 - Si cambia algo visible, regenerar capturas: `python docs/generar_capturas.py`.

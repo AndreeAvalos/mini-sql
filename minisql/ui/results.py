@@ -153,7 +153,7 @@ class ResultModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(self.headers)
 
     def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid():
+        if not self._valid(index):
             return None
         v = self.rows[index.row()][index.column()]
         if role == Qt.DisplayRole:
@@ -169,8 +169,15 @@ class ResultModel(QAbstractTableModel):
             return v[:4000]                                   # el texto largo completo al pasar el mouse
         return None
 
+    def _valid(self, index):
+        return index.isValid() and index.row() < len(self.rows) and index.column() < len(self.headers)
+
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if orientation == Qt.Horizontal:
+            # Al cambiar de modelo, Qt pide todavía los títulos de las columnas del anterior: una excepción
+            # aquí, dentro de la llamada de Qt, tumba el proceso (segfault con Python 3.10 en Linux).
+            if section >= len(self.headers):
+                return None
             if role == Qt.DisplayRole:
                 return self.headers[section]
             if role == Qt.ToolTipRole:
@@ -290,12 +297,8 @@ class ResultView(QTableView):
 
     def setModel(self, model):
         self._unsorted()                 # cada resultado nuevo llega en su orden, sin reordenar
-        # Qt no se queda con los modelos: Python los retiene. El nuevo, para que el recolector no lo borre mientras
-        # la tabla lo usa; el anterior, hasta el próximo cambio, para que no se borre a mitad de este setModel (Qt
-        # todavía lo está desconectando). Si no, PySide6 se cae (segfault en Linux).
-        previous = getattr(self, "_model_ref", None)
+        self._model_ref = model          # Qt no es dueño del modelo: que Python no lo borre mientras se muestra
         super().setModel(model)
-        self._retired_model, self._model_ref = previous, model
 
     def show_rows(self, headers, rows):
         model = ResultModel(headers, rows, self.theme)
@@ -399,7 +402,7 @@ class EditableResultModel(ResultModel):
         return flags
 
     def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid():
+        if not self._valid(index):
             return None
         row = self.rows[index.row()]
         if role == Qt.EditRole:

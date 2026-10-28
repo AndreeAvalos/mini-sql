@@ -84,3 +84,18 @@ def test_copy_raw_as_hex(app):
     view.selectRow(0)
     view.copy_selection()
     assert QGuiApplication.clipboard().text() == "0A001F00A2B30000\t2026-10-09 16:37:56"   # listo para HEXTORAW('…')
+
+
+def test_switching_to_an_empty_model_does_not_raise(app):
+    """Qt pide los títulos de las columnas del modelo anterior al cambiar de modelo: el nuevo responde None en vez
+    de lanzar IndexError (con Python 3.10 en Linux esa excepción dentro de Qt era un segfault)."""
+    view = ResultView()
+    view.setModel(ResultModel(["ID", "NOMBRE"], [(1, "x")]))
+    view.show()
+    view.resizeColumnsToContents()
+    empty = ResultModel([], [])
+    assert empty.headerData(1, Qt.Horizontal) is None and empty.headerData(0, Qt.Horizontal, Qt.ToolTipRole) is None
+    assert empty.data(empty.createIndex(0, 0)) is None
+    view.setModel(empty)
+    app.processEvents()
+    assert view.model() is empty

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSplitter,
+    QTabBar,
     QTabWidget,
     QToolButton,
     QVBoxLayout,
@@ -34,6 +35,49 @@ from .style import ERROR_COLOR, MUTED_COLOR, OK_COLOR, WARN_COLOR, card, variant
 from .workers import TaskRunner
 
 DEBUG_KEYS = (("F5", "continue"), ("F10", "over"), ("F11", "into"), ("Shift+F11", "out"), ("Shift+F5", "stop"))
+
+
+class SheetTabBar(QTabBar):
+    """Barra de hojas con el botón "+" siempre a la par de la última pestaña (como en un navegador)."""
+    GAP = 4
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.plus = QToolButton(self)
+        self.plus.setAutoRaise(True)
+        self.plus.setText("+")
+        self.plus.setToolTip("Nueva hoja (Ctrl+T)")
+        self.plus.setCursor(Qt.PointingHandCursor)
+
+    def _extra(self):
+        return self.plus.sizeHint().width() + 2 * self.GAP
+
+    # la barra pide lugar para el botón, así QTabWidget no lo deja afuera
+    def sizeHint(self):
+        size = super().sizeHint()
+        size.setWidth(size.width() + self._extra())
+        return size
+
+    def minimumSizeHint(self):
+        size = super().minimumSizeHint()
+        size.setWidth(size.width() + self._extra())
+        return size
+
+    def tabLayoutChange(self):
+        super().tabLayoutChange()
+        self._place_plus()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._place_plus()
+
+    def _place_plus(self):
+        hint = self.plus.sizeHint()
+        size = min(hint.height(), self.height() - 4) if self.height() > 8 else hint.height()
+        right = self.tabRect(self.count() - 1).right() if self.count() else 0
+        x = min(right + self.GAP, self.width() - max(hint.width(), size) - self.GAP)   # muchas hojas: al borde
+        self.plus.setGeometry(max(0, x), (self.height() - size) // 2, max(hint.width(), size), size)
+        self.plus.raise_()
 
 
 class ConnectionTab(QWidget):
@@ -59,17 +103,14 @@ class ConnectionTab(QWidget):
         self.debugger = PlsqlDebugger(db, self)
 
         self.sheets = QTabWidget()
+        self.sheets.setTabBar(SheetTabBar(self.sheets))
         self.sheets.setTabsClosable(True)
         self.sheets.setMovable(True)
         self.sheets.setDocumentMode(True)
         self.sheets.tabCloseRequested.connect(self.close_sheet)
         self.sheets.tabBarDoubleClicked.connect(self.rename_sheet)
-        plus = QToolButton()
-        plus.setAutoRaise(True)
-        plus.setText("+ Hoja")
-        plus.setToolTip("Nueva hoja (Ctrl+T)")
-        plus.clicked.connect(lambda: self.add_sheet())
-        self.sheets.setCornerWidget(plus, Qt.TopRightCorner)
+        self.new_sheet_btn = self.sheets.tabBar().plus           # "+" pegado a la última hoja
+        self.new_sheet_btn.clicked.connect(lambda: self.add_sheet())
 
         self.explorer = ObjectExplorer(self)
         self.debug_panel = DebugPanel(self.debugger)

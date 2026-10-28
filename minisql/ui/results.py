@@ -290,10 +290,12 @@ class ResultView(QTableView):
 
     def setModel(self, model):
         self._unsorted()                 # cada resultado nuevo llega en su orden, sin reordenar
-        # Qt no se queda con el modelo: si nadie en Python lo retiene (p. ej. setModel(ResultModel(...))), el
-        # recolector lo borra mientras la tabla lo usa y PySide6 se cae (segfault en Linux)
-        self._model_ref = model
+        # Qt no se queda con los modelos: Python los retiene. El nuevo, para que el recolector no lo borre mientras
+        # la tabla lo usa; el anterior, hasta el próximo cambio, para que no se borre a mitad de este setModel (Qt
+        # todavía lo está desconectando). Si no, PySide6 se cae (segfault en Linux).
+        previous = getattr(self, "_model_ref", None)
         super().setModel(model)
+        self._retired_model, self._model_ref = previous, model
 
     def show_rows(self, headers, rows):
         model = ResultModel(headers, rows, self.theme)

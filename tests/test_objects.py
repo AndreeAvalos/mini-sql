@@ -45,6 +45,26 @@ def test_explorer_shows_table_triggers(app):
     assert tab.sheets.currentWidget().key == ("HR", "EMP_BI", "TRIGGER")
 
 
+def test_new_sheet_button_follows_the_last_tab(app):
+    tab = ConnectionTab(make_session(FakeConn()), "T", "PROD")
+    tab.resize(1000, 600)
+    tab.show()
+    pump(app)
+    bar, plus = tab.sheets.tabBar(), tab.new_sheet_btn
+    assert plus.text() == "+" and plus.parentWidget() is bar and tab.sheets.cornerWidget() is None
+
+    def gap():
+        return plus.geometry().left() - bar.tabRect(bar.count() - 1).right()
+
+    assert 0 < gap() <= 8 and plus.isVisible()
+    plus.click()
+    pump(app)
+    assert bar.count() == 2 and 0 < gap() <= 8                    # se corre con la hoja nueva
+    tab.close_sheet(1)
+    pump(app)
+    assert bar.count() == 1 and 0 < gap() <= 8
+
+
 def test_object_viewer(app):
     tab = ConnectionTab(make_session(FakeConn()), "T", "PROD")
     viewer = tab.open_object("SCOTT", "EMP", "TABLE")

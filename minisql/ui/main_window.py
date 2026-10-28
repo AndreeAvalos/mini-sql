@@ -15,11 +15,14 @@ from PySide6.QtWidgets import (
 )
 
 from ..config import load_settings, save_settings
-from .connect_dialog import ConnectDialog
+from ..db.session import OracleSession
+from .connect_dialog import ConnectDialog, saved_login
+from .connecting_tab import ConnectingTab
 from .connection_tab import ConnectionTab
 from .session_keeper import SessionKeeper
 from .style import font_zoom
 from .updates import UpdateManager
+from .workers import TaskRunner
 
 
 class MainWindow(QMainWindow):
@@ -28,6 +31,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("MiniSQL")
         self.relaunch_exe = None          # .exe a abrir al terminar (después de instalar una actualización)
+        self.closing = False
+        self.runner = TaskRunner(self)    # conexiones que se recuperan al abrir, sin bloquear la ventana
         self.resize(1200, 800)
 
         self.tabs = QTabWidget()
@@ -104,25 +109,74 @@ class MainWindow(QMainWindow):
         return [self.tabs.widget(i) for i in range(self.tabs.count())
                 if isinstance(self.tabs.widget(i), ConnectionTab)]
 
+    def saved_tabs(self):
+        """Lo que guarda el guardián: las conexiones abiertas y las que se están recuperando, en orden."""
+        return [self.tabs.widget(i) for i in range(self.tabs.count())
+                if isinstance(self.tabs.widget(i), (ConnectionTab, ConnectingTab))]
+
+    # --- recuperar la sesión anterior
     def restore_session(self):
-        """Al abrir: vuelve a conectar y abrir las hojas de la sesión anterior."""
+        """Al abrir: vuelve a conectar y abrir las hojas de la sesión anterior. Las conexiones con la contraseña
+        en el llavero se abren a la vez y sin ventanas (cada pestaña muestra un skeleton mientras tanto); las
+        demás (o las que fallan) piden la contraseña después, una por una."""
         states = self.keeper.saved.get("connections") or []
         if not states:
             self.keeper.start()
             self.new_connection()
             return
         self.keeper.paused = True
+        self._connecting, self._to_ask = 0, []
         for state in states:
-            dlg = ConnectDialog(self, preset=state)
+            holder = ConnectingTab(state)
+            self.tabs.addTab(holder, f"◌ {state['name']}")
+            login = saved_login(state)
+            if login is None:
+                self._to_ask.append((holder, None))
+                continue
+            self._connecting += 1
+            self.runner.run(lambda lg=login: OracleSession.open(lg.user, lg.password, lg.dsn),
+                            lambda session, h=holder, lg=login: self._auto_connected(h, session, lg),
+                            lambda msg, h=holder: self._auto_failed(h, msg))
+        self.select_connection(self.keeper.saved.get("current"))
+        if not self._connecting:
+            self._ask_remaining()
+
+    def _auto_connected(self, holder, session, login):
+        if self.tabs.indexOf(holder) < 0:          # se cerró la pestaña mientras conectaba (ya quedó guardada)
+            session.close()
+        else:
+            self._replace_holder(holder, session, login.name, login.dsn_label)
+        self._connected_one()
+
+    def _auto_failed(self, holder, msg):
+        if self.tabs.indexOf(holder) >= 0:
+            holder.show_waiting()
+            self._to_ask.append((holder, msg))     # se pide la contraseña con el error a la vista
+        self._connected_one()
+
+    def _connected_one(self):
+        self._connecting -= 1
+        if not self._connecting:
+            self._ask_remaining()
+
+    def _ask_remaining(self):
+        if self.closing:
+            return
+        current = self.keeper.saved.get("current")
+        for holder, error in self._to_ask:
+            if self.tabs.indexOf(holder) < 0:
+                continue
+            self.tabs.setCurrentWidget(holder)
+            holder.show_waiting()
+            dlg = ConnectDialog(self, preset=holder.state, error=error)
             if dlg.exec() == QDialog.Accepted:
-                tab = self.add_connection(dlg.session, dlg.conn_name, dlg.dsn_label)
-                if dlg.conn_name == state["name"]:
-                    tab.restore(state)
-                else:
-                    self.keeper.park(state)
+                self._replace_holder(holder, dlg.session, dlg.conn_name, dlg.dsn_label)
             else:
-                self.keeper.park(state)               # no se pierde: vuelve al conectarse a ese perfil
-        self.select_connection(self.keeper.saved.get("current"))   # la última usada, no la de más a la derecha
+                self.tabs.removeTab(self.tabs.indexOf(holder))
+                holder.deleteLater()
+                self.keeper.park(holder.state)     # no se pierde: vuelve al conectarse a ese perfil
+        self._to_ask = []
+        self.select_connection(current)            # la última usada, no la de más a la derecha
         self.keeper.paused = False
         self.keeper.save()
         self.keeper.start()
@@ -131,11 +185,25 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Hojas guardadas de {names}: se recuperan al conectarte a ese perfil.", 15000)
 
-    def add_connection(self, session, name, dsn_label=None):
+    def _replace_holder(self, holder, session, name, dsn_label):
+        """Pone la conexión real en el lugar de la pestaña que estaba conectando."""
+        state = holder.state
+        focus = self.tabs.currentWidget() is holder          # no saltar de pestaña cada vez que termina una
+        tab = self.add_connection(session, name, dsn_label, index=self.tabs.indexOf(holder), focus=focus)
+        self.tabs.removeTab(self.tabs.indexOf(holder))
+        holder.deleteLater()
+        if name == state["name"]:
+            tab.restore(state)
+        else:
+            self.keeper.park(state)
+        return tab
+
+    def add_connection(self, session, name, dsn_label=None, index=None, focus=True):
         tab = ConnectionTab(session, name, dsn_label)
-        idx = self.tabs.addTab(tab, name)
+        idx = self.tabs.addTab(tab, name) if index is None else self.tabs.insertTab(index, tab, name)
         tab.pending_changed.connect(lambda t=tab: self.update_title(t))
-        self.tabs.setCurrentIndex(idx)
+        if focus:
+            self.tabs.setCurrentIndex(idx)
         parked = self.keeper.claim(name)
         if parked:
             tab.restore(parked)
@@ -144,7 +212,7 @@ class MainWindow(QMainWindow):
 
     def select_connection(self, name):
         """Elige la pestaña de la conexión con ese nombre (si está abierta)."""
-        for tab in self.conn_tabs():
+        for tab in self.saved_tabs():
             if tab.name == name:
                 self.tabs.setCurrentWidget(tab)
                 return True
@@ -199,7 +267,9 @@ class MainWindow(QMainWindow):
                 return
             closed.append(state)
             self.tabs.removeTab(0)
+        self.closing = True                             # lo que termine de conectar después ya no abre nada
         self.keeper.stop()
+        self.keeper.paused = False                      # se pudo cerrar mientras se recuperaba la sesión
         self.keeper.save(full)
         self.relaunch_exe = self.updates.on_exit()      # actualización pendiente: ya con todo guardado
         event.accept()

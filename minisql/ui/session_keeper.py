@@ -30,7 +30,7 @@ class SessionKeeper(QObject):
         self.timer.stop()
 
     def snapshot(self):
-        conns = [t.snapshot() for t in self.window.conn_tabs()]
+        conns = [t.snapshot() for t in self.window.saved_tabs()]     # también las que todavía se conectan
         current = self.window.current_conn()           # la conexión que se estaba usando: se vuelve a elegir al abrir
         return {"connections": conns, "parked": list(self.parked.values()),
                 "current": current.name if current else None}

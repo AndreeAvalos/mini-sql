@@ -25,6 +25,7 @@ except ImportError:
     keyring = None
 
 import contextlib
+from typing import NamedTuple
 
 from ..config import KEYRING_SERVICE, load_profiles, load_settings, save_profiles, save_settings
 from ..db.session import OracleSession
@@ -32,11 +33,44 @@ from ..db.tns import default_tns_path, parse_tnsnames
 from .style import ERROR_COLOR, MUTED_COLOR
 
 
+class Login(NamedTuple):
+    name: str
+    user: str
+    dsn: str            # descriptor para conectar (el alias ya resuelto con tnsnames)
+    dsn_label: str      # lo que escribió el usuario (alias o host:puerto/servicio)
+    password: str
+
+
+def saved_login(preset):
+    """Datos para recuperar sin preguntar una conexión de la sesión anterior: su perfil y la contraseña del
+    llavero. None si falta alguno (entonces se pide con el diálogo)."""
+    if keyring is None:
+        return None
+    profile = next((p for p in load_profiles() if p["name"] == preset["name"]), None)
+    if profile is None:
+        return None
+    try:
+        password = keyring.get_password(KEYRING_SERVICE, profile["name"])
+    except Exception:
+        return None
+    if not password:
+        return None
+    tns, path = {}, default_tns_path()
+    if path and Path(path).is_dir():
+        path = str(Path(path) / "tnsnames.ora")
+    if path:
+        with contextlib.suppress(OSError):
+            tns = parse_tnsnames(path)
+    dsn = profile["dsn"].strip()
+    return Login(profile["name"], profile["user"], tns.get(dsn.upper(), dsn), dsn, password)
+
+
 class ConnectDialog(QDialog):
-    def __init__(self, parent=None, preset=None):
+    def __init__(self, parent=None, preset=None, error=None):
         """preset: conexión de una sesión guardada ({name, user, dsn, tabs}) para recuperarla.
-        Si su contraseña está en el llavero, conecta sola."""
+        Si su contraseña está en el llavero, conecta sola (salvo que ya se intentó: error dice qué pasó)."""
         super().__init__(parent)
+        self.error = error
         self.setWindowTitle("Nueva conexión" if not preset else f"Recuperar sesión: {preset['name']}")
         self.setMinimumWidth(420)
         self.profiles = load_profiles()
@@ -85,6 +119,12 @@ class ConnectDialog(QDialog):
                           "Si cancelas, se guardan para cuando te conectes a este perfil.")
             note.setWordWrap(True)
             form.addRow(note)
+        if error:
+            failed = QLabel(f"No se pudo conectar: {error.splitlines()[0]}")
+            failed.setToolTip(error)
+            failed.setWordWrap(True)
+            failed.setStyleSheet(f"color: {ERROR_COLOR};")
+            form.addRow(failed)
         form.addRow("Perfil", self.combo)
         form.addRow("Nombre", self.name)
         form.addRow("Usuario", self.user)
@@ -117,7 +157,7 @@ class ConnectDialog(QDialog):
             self.user.setText(preset.get("user") or "")
             self.dsn.setCurrentText(preset.get("dsn") or "")
             self.password.setFocus()
-        if self.password.text():
+        if self.password.text() and not self.error:
             QTimer.singleShot(0, self, self.try_connect)   # contraseña en el llavero: reconectar sin preguntar
 
     def browse_tns(self):

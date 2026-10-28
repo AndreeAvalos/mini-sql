@@ -287,7 +287,10 @@ class FakeDebugSession:
 class FakeDialog:
     accept = True
 
-    def __init__(self, parent=None, preset=None):
+    errors = []                                                 # el error de la reconexión automática, si hubo
+
+    def __init__(self, parent=None, preset=None, error=None):
+        FakeDialog.errors.append(error)
         preset = preset or {"name": "PROD", "dsn": "PROD"}     # el usuario elige el perfil PROD
         self.conn_name, self.dsn_label = preset["name"], preset["dsn"]
         self.session = make_session()

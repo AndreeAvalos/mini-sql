@@ -9,6 +9,7 @@ from .editors import CodeEditor
 from .find_bar import with_find_bar
 from .result_panel import ResultPanel
 from .results import ResultView
+from .skeleton import SkeletonOverlay
 from .style import StatusLabel
 from .workers import Emitter
 
@@ -78,6 +79,10 @@ class ObjectViewer(QWidget):
                 self.tabs.addTab(page, label)
             self.pages[label] = page
         self.loaded = set()
+        # mientras carga cada pestaña: la forma de lo que viene (filas o líneas de código)
+        self.skeletons = {label: SkeletonOverlay(self.code if label == "Código" else page,
+                                                 "text" if label in ("Código", "DDL") else "table")
+                          for label, page in self.pages.items() if label != "Datos"}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -146,8 +151,11 @@ class ObjectViewer(QWidget):
             self.load_data()
             return
         self.status.show_message("Cargando…")
+        skeleton = self.skeletons[label]
+        skeleton.start()
 
         def ok(result):
+            skeleton.stop()
             self.status.show_message("")
             if label == "Código":
                 self.code.set_code(result.text)
@@ -157,6 +165,7 @@ class ObjectViewer(QWidget):
                 self.pages[label].show_rows(result.headers, result.rows)
 
         def err(msg):
+            skeleton.stop()
             self.loaded.discard(label)       # al volver a la pestaña se reintenta
             self.status.error(msg)
 

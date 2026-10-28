@@ -16,7 +16,13 @@ Pruebas: `tests/test_session.py` (WorkspaceStore, guardián), `test_app.py`, `te
 ## Guardián (ui/session_keeper.py, `SessionKeeper`)
 - Cada `AUTOSAVE_MS` (3 s) toma `MainWindow` → `ConnectionTab.snapshot()` y guarda.
 - `park(state)`: al cerrar una conexión guarda sus hojas en "(guardadas)"; `claim(name)` las devuelve al
-  reconectar. `MainWindow.restore_session()` reabre conexiones (connect_dialog reconecta con keyring).
+  reconectar. `MainWindow.restore_session()` pone una `ConnectingTab` (ui/connecting_tab.py: skeleton de la
+  ventana + "Conectando…", guarda el `state`) por conexión; las que tienen perfil y contraseña en el llavero
+  (`connect_dialog.saved_login` → `Login`) conectan a la vez en `self.runner` sin abrir ventanas y se reemplazan
+  en su lugar (`_replace_holder`); al terminar todas, `_ask_remaining` abre `ConnectDialog(preset, error=…)` para
+  las que no tenían contraseña o fallaron, luego elige la conexión `current` y reanuda el guardián.
+  `saved_tabs()` (reales + provisorias) es lo que guarda el guardián: cerrar durante la recuperación no pierde nada.
+  En las pruebas, conftest anula `main_window.saved_login` (nunca lee perfiles ni llavero reales).
 - Una sola instancia (`app.single_instance_lock`): dos guardianes sobre la misma carpeta se pisarían.
 
 ## Reglas

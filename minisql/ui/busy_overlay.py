@@ -79,7 +79,11 @@ class BusyOverlay(QWidget):
             self.setGeometry(obj.rect())
         return False
 
+    dim = True                                           # False: debajo hay un skeleton, que se vea sin apagar
+
     def paintEvent(self, _event):
+        if not self.dim:
+            return
         color = self.palette().window().color()
         color.setAlpha(170)                              # lo de abajo se ve, apagado
         QPainter(self).fillRect(self.rect(), color)

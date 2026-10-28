@@ -3,9 +3,12 @@
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from minisql.ui import main_window
+from minisql.ui.connect_dialog import Login
+from minisql.ui.connecting_tab import ConnectingTab
 from minisql.ui.connection_tab import ConnectionTab
 from minisql.ui.main_window import MainWindow
 from minisql.workspace import WorkspaceStore, load_session, read_json, worth_keeping, write_json_atomic
@@ -205,6 +208,40 @@ def test_restore_selects_the_last_used_connection(app, tmp_path, monkeypatch):
     assert w.keeper.snapshot()["current"] == "PROD"
     w.keeper.save()
     assert load_session(path)["current"] == "PROD"
+    w.keeper.stop()
+
+
+def test_restore_connects_in_background_without_dialogs(app, tmp_path, monkeypatch):
+    """Con la contraseña en el llavero no se abre ninguna ventana: cada conexión muestra un skeleton mientras
+    conecta y se reemplaza en su lugar; la que falla pide la contraseña al final, con el error a la vista."""
+    path = tmp_path / "sesion"
+    conns = [{"name": n, "user": "u", "dsn": n, "tabs": [{"kind": "sheet", "title": "Hoja1", "text": n}]}
+             for n in ("QA", "FALLA", "PROD")]
+    WorkspaceStore(path).save({"connections": conns, "parked": [], "current": "PROD"})
+    release = threading.Event()
+
+    def open_session(user, password, dsn):
+        release.wait(10)
+        if dsn == "FALLA":
+            raise RuntimeError("ORA-01017: invalid username/password")
+        return make_session()
+
+    monkeypatch.setattr(main_window, "saved_login",
+                        lambda p: Login(p["name"], "u", p["dsn"], p["dsn"], "secreto"))
+    monkeypatch.setattr(main_window.OracleSession, "open", staticmethod(open_session))
+    monkeypatch.setattr(main_window, "ConnectDialog", FakeDialog)
+    FakeDialog.accept, FakeDialog.errors = False, []
+    w = MainWindow(session_path=path, restore=False)
+    w.restore_session()
+    assert [type(w.tabs.widget(i)) for i in range(3)] == [ConnectingTab] * 3      # todavía conectando
+    assert w.tabs.currentWidget().name == "PROD" and FakeDialog.errors == []
+    assert [c["name"] for c in w.keeper.snapshot()["connections"]] == ["QA", "FALLA", "PROD"]   # nada se pierde
+    release.set()
+    wait_until(app, lambda: not w.keeper.paused)
+    assert FakeDialog.errors == ["ORA-01017: invalid username/password"]           # una sola ventana, la que falló
+    assert [w.tabs.tabText(i) for i in range(w.tabs.count())] == ["QA", "PROD"]
+    assert w.current_conn().name == "PROD" and w.current_conn().current_sheet().editor.toPlainText() == "PROD"
+    assert "FALLA" in w.keeper.parked                                              # canceló: sus hojas quedan
     w.keeper.stop()
 
 

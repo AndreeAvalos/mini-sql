@@ -16,7 +16,9 @@ Pruebas: `tests/test_session.py`, `test_objects.py`, `test_guard.py`, con `FakeC
 - `apply_grid_changes(owner, table, ops)`, `commit`, `rollback`, `cancel` (cancela la llamada en curso),
   `with_meta_cursor(fn)`, `transaction_in_progress`, `close`.
 - `disconnect()` / `reconnect()` (con `opener`, en un hilo; `SessionBusy` si hay algo corriendo) y `connected`. Sin conexión, `execute`, `execute_script`, `with_meta_cursor`, commit/rollback y la grilla lanzan `NotConnected`. `connection_lost(error)`: ORA-03113/03114/03135/02396/00028/01012, DPY-1001/4011, DPI-1080. `user` se recuerda (no se lee de una conexión cerrada).
-- dblinks: `db/__init__.py` pone `fetch_lobs=False` (LOB como bytes/texto), pero un BLOB/CLOB remoto así da ORA-03149 (o ORA-22992). `_run` reintenta solo si la consulta usa `@` (`remote_lob_error`): `outputtypehandler=lob_locators` (referencias LOB) y `rowfactory=read_lobs` (las lee; si no se puede, la celda dice `<BLOB no se pudo leer por el dblink>`). Si vuelve a fallar (también DPY-5002: el modo thin no entiende el locator remoto) → `RemoteLobError` con `REMOTE_LOB_HELP` (ORA-03149 también tapa errores remotos comunes: columna inexistente, permisos). Pruebas: `tests/test_dblink.py`.
+- dblinks: `db/__init__.py` pone `fetch_lobs=False` (LOB como bytes/texto), pero un BLOB/CLOB remoto así da ORA-03149 (o ORA-22992). `_run` reintenta solo si la consulta usa `@` (`remote_lob_error`): `outputtypehandler=lob_locators` (referencias LOB) y `rowfactory=read_lobs` (las lee; si no se puede, la celda dice `<BLOB no se pudo leer por el dblink>`). Si vuelve a fallar (también DPY-5002: el modo thin no entiende el locator remoto) → `without_lobs` envuelve
+la consulta y cambia cada columna LOB por el aviso "<BLOB: no se puede leer por el dblink>" (las demás se ven);
+si no se puede armar (nombres repetidos, error al describir) → `RemoteLobError` con `REMOTE_LOB_HELP` (ORA-03149 también tapa errores remotos comunes: columna inexistente, permisos). Pruebas: `tests/test_dblink.py`.
 - `read_dbms_output(cur)`: lee DBMS_OUTPUT por bloques; `output_enabled` evita habilitarlo cada vez.
 - Autocommit apagado: el usuario decide Commit/Rollback.
 

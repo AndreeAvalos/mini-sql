@@ -27,6 +27,7 @@ from ..db.catalog import (
 )
 from ..db.source import fetch_ddl
 from ..sql.text import q
+from .skeleton import Skeleton
 from .style import ERROR_COLOR, MUTED_COLOR
 from .theme import badge_icon, tokens
 
@@ -123,9 +124,19 @@ class ObjectExplorer(QWidget):
         info["loaded"] = True
         self.set_info(item, info)
         item.takeChildren()
-        ph = QTreeWidgetItem(["Cargando…"])
-        ph.setForeground(0, QColor(MUTED_COLOR))
-        item.addChild(ph)
+        self.add_skeleton(item)
+
+    def add_skeleton(self, parent=None, rows=3):
+        """Renglones fantasma (ícono + barra con brillo) mientras carga; se reemplazan por los de verdad."""
+        for _ in range(rows):
+            ph = QTreeWidgetItem([""])
+            self.set_info(ph, {"kind": "placeholder"})
+            ph.setFlags(Qt.NoItemFlags)
+            if parent is None:
+                self.tree.addTopLevelItem(ph)
+            else:
+                parent.addChild(ph)
+            self.tree.setItemWidget(ph, 0, Skeleton("line"))
 
     def show_child_error(self, item, err):
         info = self.info(item)
@@ -143,7 +154,7 @@ class ObjectExplorer(QWidget):
     # --- esquemas
     def load_schemas(self):
         self.tree.clear()
-        self.add_item(None, "Cargando esquemas…", {"kind": "placeholder"})
+        self.add_skeleton(rows=6)
         hide = self.hide_sys.isChecked()
 
         def ok(names):

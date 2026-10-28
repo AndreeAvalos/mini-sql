@@ -59,9 +59,34 @@ def remote_lob_error(error, sql):
 
 def lob_locators(cursor, metadata):
     """outputtypehandler: los LOB llegan como referencia (LOB), que sí cruzan el dblink en Oracle 12.2+."""
-    if metadata.type_code in (oracledb.DB_TYPE_BLOB, oracledb.DB_TYPE_CLOB, oracledb.DB_TYPE_NCLOB):
+    if metadata.type_code in LOB_TYPES:
         return cursor.var(metadata.type_code, arraysize=cursor.arraysize)
     return None
+
+
+LOB_TYPES = (oracledb.DB_TYPE_BLOB, oracledb.DB_TYPE_CLOB, oracledb.DB_TYPE_NCLOB)
+
+
+def without_lobs(cur, sql):
+    """La misma consulta con cada columna BLOB/CLOB cambiada por un aviso, para ver el resto de las columnas
+    cuando el LOB no cruza el dblink de ninguna forma. None si no se puede armar (sin LOB, nombres repetidos…)."""
+    try:
+        cur.execute(f"select * from (\n{sql}\n) where 1 = 0")      # solo la descripción, sin traer filas
+        columns = [(d[0], d[1]) for d in cur.description or ()]
+    except Exception:
+        return None
+    names = [name for name, _ in columns]
+    if not any(t in LOB_TYPES for _, t in columns) or len(set(names)) != len(names):
+        return None
+
+    def column(name, dtype):
+        ident = '"' + name.replace('"', '""') + '"'
+        if dtype in LOB_TYPES:
+            kind = dtype.name.replace("DB_TYPE_", "")
+            return f"'<{kind}: no se puede leer por el dblink>' as {ident}"
+        return ident
+
+    return f"select {', '.join(column(n, t) for n, t in columns)}\nfrom (\n{sql}\n)"
 
 
 def read_lobs(*row):
@@ -347,9 +372,20 @@ class OracleSession:
                 cur.execute(sql)
                 rows = cur.fetchmany(PAGE_ROWS) if cur.description else None
             except Exception as again:
-                if remote_lob_error(again, sql):
+                if not remote_lob_error(again, sql):
+                    raise
+                # Tampoco como referencia (p. ej. DPY-5002: el modo thin no entiende el locator remoto):
+                # se muestran las demás columnas y el LOB queda como un aviso.
+                cur.outputtypehandler = None
+                cur.rowfactory = None
+                plain = without_lobs(cur, sql)
+                if plain is None:
                     raise RemoteLobError(REMOTE_LOB_HELP + f"\n\n{again}") from again
-                raise
+                try:
+                    cur.execute(plain)
+                    rows = cur.fetchmany(PAGE_ROWS) if cur.description else None
+                except Exception as last:
+                    raise RemoteLobError(REMOTE_LOB_HELP + f"\n\n{again}") from last
         if cur.description:
             return {
                 "headers": [d[0] for d in cur.description],

@@ -26,6 +26,9 @@ def isolated_font_zoom(monkeypatch):
     monkeypatch.setattr(placement, "_load", lambda: dict(places))
     monkeypatch.setattr(placement, "_save", places.update)
     monkeypatch.setattr(placement, "_position", None)
+    # al recuperar la sesión, nunca leer perfiles ni el llavero reales: sin contraseña guardada, va al diálogo
+    from minisql.ui import main_window
+    monkeypatch.setattr(main_window, "saved_login", lambda preset: None)
 
 
 @pytest.fixture(scope="session")

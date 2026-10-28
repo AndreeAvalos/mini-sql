@@ -29,6 +29,7 @@ from ..sql.editable import editable_target
 from .busy_overlay import BusyOverlay
 from .results import EditableResultModel, ResultModel, ResultView
 from .save_preview import SavePreviewDialog
+from .skeleton import SkeletonOverlay
 from .style import ERROR_COLOR, MUTED_COLOR, OK_COLOR, WARN_COLOR
 from .theme import tokens
 
@@ -85,6 +86,7 @@ class ResultPanel(QWidget):
         self.stream = None             # cursor abierto en Oracle para traer las páginas siguientes
         self.fetching = False
         self.saved_uncommitted = False # se guardaron cambios de la grilla que esperan Commit/Rollback
+        self.shown = False             # ya mostró algo (resultado o mensaje): ocupado lo tapa en vez del skeleton
         conn_tab.transaction_ended.connect(self._transaction_ended)
 
         self.view = ResultView()
@@ -153,6 +155,7 @@ class ResultPanel(QWidget):
             footer.addWidget(w)
         footer.addStretch(1)
         layout.addLayout(footer)
+        self.skeleton = SkeletonOverlay(self.stack, "table")   # la primera vez: la forma de la tabla que viene
         self.overlay = BusyOverlay(self)                   # "Ejecutando…" encima, bloquea lo anterior
 
         self.filter_timer = QTimer(self)
@@ -178,8 +181,13 @@ class ResultPanel(QWidget):
         on_cancel: si se da, la capa muestra un botón Cancelar."""
         if text:
             self.filter_timer.stop()
+            first = not self.shown and not self.overlay.active          # nada que tapar: se ve el skeleton
+            self.overlay.dim = not first
+            if first:
+                self.skeleton.start()
             self.overlay.start(text, on_cancel)
         else:
+            self.skeleton.stop()
             self.overlay.stop()
         for w in (self.view, self.filter_edit, self.filter_column):
             w.setEnabled(not text)                         # tampoco con el teclado (F2, escribir, Ctrl+C…)
@@ -221,6 +229,7 @@ class ResultPanel(QWidget):
 
     def show_message(self, title, detail="", error=False):
         """Una sentencia sin filas (UPDATE, DDL, PL/SQL…) o un error: se muestra en lugar de la tabla anterior."""
+        self.shown = True
         self._close_stream()
         self.target = None
         self.view.setModel(ResultModel([], [], self.view.theme, PAGE_ROWS))
@@ -233,6 +242,7 @@ class ResultPanel(QWidget):
 
     def show_result(self, res, sql=None):
         """Muestra el resultado de una consulta. Si trae ROWID y es de una sola tabla, se puede editar."""
+        self.shown = True
         self.stack.setCurrentWidget(self.view)
         self._show_filter(True)
         headers, rows = res["headers"], res["rows"]

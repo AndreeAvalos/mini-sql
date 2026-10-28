@@ -76,8 +76,22 @@ def test_remote_errors_get_an_explanation():
 
 class LocatorFailsCursor(DblinkCursor):
     """La referencia remota tampoco se puede leer: el modo thin no entiende el locator que manda el dblink."""
+    executed = []
+
+    def execute(self, sql, *args, **kwargs):
+        if "where 1 = 0" in sql.lower() or "no se puede leer" in sql:       # la descripción y la consulta sin LOB
+            FakeCursor.execute(self, sql, *args, **kwargs)
+            LocatorFailsCursor.executed.append(sql)
+            if "repetida" in self.sql:
+                self.description = [("ID", oracledb.DB_TYPE_NUMBER), ("ID", oracledb.DB_TYPE_BLOB)]
+            else:
+                self.description = [("DOCUMENTO", oracledb.DB_TYPE_NUMBER), ("FIRMA", oracledb.DB_TYPE_BLOB)]
+            return
+        super().execute(sql, *args, **kwargs)
 
     def fetchmany(self, n):
+        if "no se puede leer" in self.sql:
+            return [(1, "<BLOB: no se puede leer por el dblink>")]
         if "@tf052" in self.sql:
             raise RuntimeError("DPY-5002: internal error: read integer of length 7 when expecting integer of "
                                "no more than length 4")
@@ -89,9 +103,18 @@ class LocatorFailsConn(FakeConn):
         return LocatorFailsCursor()
 
 
-def test_unreadable_remote_locator_gets_an_explanation():
-    with pytest.raises(RemoteLobError) as err:
-        make_session(LocatorFailsConn()).execute("SELECT * FROM WMS_DOCUMENTOS@TF052")
+def test_unreadable_remote_locator_shows_the_other_columns():
+    LocatorFailsCursor.executed = []
+    res = make_session(LocatorFailsConn()).execute("SELECT * FROM WMS_DOCUMENTOS@TF052")
+    assert res["headers"] == ["DOCUMENTO", "FIRMA"]
+    assert res["rows"] == [(1, "<BLOB: no se puede leer por el dblink>")]
+    plain = LocatorFailsCursor.executed[-1]
+    assert plain.startswith('select "DOCUMENTO", \'<BLOB: no se puede leer por el dblink>\' as "FIRMA"')
+
+
+def test_unreadable_remote_locator_without_a_rewrite_gets_an_explanation():
+    with pytest.raises(RemoteLobError) as err:                        # nombres repetidos: no se puede envolver
+        make_session(LocatorFailsConn()).execute("SELECT a.id, b.id FROM WMS_DOCUMENTOS@TF052 a -- repetida")
     assert "BLOB/CLOB" in str(err.value) and "DPY-5002" in str(err.value)
 
 

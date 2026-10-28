@@ -51,11 +51,20 @@ def test_explorer_shows_skeleton_rows_while_loading(app):
 
 def test_first_run_shows_a_table_skeleton(app):
     tab = ConnectionTab(make_session(FakeConn()), "T", "PROD")
-    panel = tab.current_sheet().results
-    panel.set_busy("Ejecutando…")
-    assert panel.skeleton.active and not panel.overlay.dim         # nada que tapar: se ve la forma de la tabla
+    sheet = tab.current_sheet()
+    panel = sheet.results
+    for before in (None, "message", "table"):                      # primera vez, tras un error, tras una tabla
+        if before == "message":
+            panel.show_message("ORA-00942: la tabla no existe", error=True)
+        elif before == "table":
+            panel.show_result({"headers": ["A"], "rows": [(1,)]})
+        sheet.set_running(True)
+        assert panel.skeleton.active and not panel.overlay.dim and not panel.view.isEnabled()
+        sheet.set_running(False)
+        assert not panel.skeleton.active
+    panel.set_busy("Guardando…")                                     # guardar: la tabla queda a la vista, apagada
+    assert not panel.skeleton.active and panel.overlay.dim
     panel.set_busy(None)
-    assert not panel.skeleton.active
 
 
 def test_object_viewer_tabs_use_skeletons(app):

@@ -167,7 +167,7 @@ class SheetWidget(QWidget):
         if running:
             self.set_status("")
             self.result_tabs.setCurrentWidget(self.results)
-            self.results.set_busy(text or "Ejecutando…", self.conn_tab.db.cancel)
+            self.results.set_busy(text or "Ejecutando…", self.conn_tab.db.cancel, skeleton=True)
         else:
             self.results.set_busy(None)
 

@@ -176,14 +176,15 @@ class ResultPanel(QWidget):
     def busy(self):
         return self.overlay.active
 
-    def set_busy(self, text, on_cancel=None):
+    def set_busy(self, text, on_cancel=None, skeleton=False):
         """text: qué se está haciendo (tapa los resultados y no deja tocarlos); None: terminó.
-        on_cancel: si se da, la capa muestra un botón Cancelar."""
+        on_cancel: si se da, la capa muestra un botón Cancelar.
+        skeleton: viene un resultado nuevo (ejecutar, cargar datos): en lugar de lo anterior se ve la forma de la
+        tabla. Si no (guardar, traer más filas), lo anterior queda a la vista, apagado."""
         if text:
             self.filter_timer.stop()
-            first = not self.shown and not self.overlay.active          # nada que tapar: se ve el skeleton
-            self.overlay.dim = not first
-            if first:
+            self.overlay.dim = not skeleton
+            if skeleton:
                 self.skeleton.start()
             self.overlay.start(text, on_cancel)
         else:

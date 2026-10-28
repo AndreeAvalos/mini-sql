@@ -48,7 +48,9 @@ Pruebas: `tests/test_grid.py`, `test_results.py`. Captura: `docs/img/edicion.png
 - Sentencias sin filas y errores: `ResultPanel.show_message(título, detalle, error)` muestra `ResultMessage` en el `stack` (✔ "3 filas actualizadas" · tiempo · pendiente de Commit, o ✖ el error) y oculta el filtro; `show_result` vuelve a la tabla. El texto sale de `sql.text.result_message`. Pruebas: `tests/test_result_message.py`.
 
 ## Ocupado
-- `ResultPanel.set_busy(texto, on_cancel)` muestra `BusyOverlay` (ui/busy_overlay.py) encima del panel al ejecutar, guardar, traer filas o cargar Datos; deshabilita tabla y filtro y `_editable_model()` devuelve None (ni atajos ni menú). `set_busy(None)` lo quita.
+- `ResultPanel.set_busy(texto, on_cancel)` muestra `BusyOverlay` (ui/busy_overlay.py) encima del panel al ejecutar, guardar, traer filas o cargar Datos; deshabilita tabla y filtro y `_editable_model()` devuelve None (ni atajos ni menú). `set_busy(None)` lo quita. Con `skeleton=True` (ejecutar una hoja, cargar Datos del visor) el panel muestra el
+  skeleton de una tabla en lugar de lo anterior (`overlay.dim = False`); sin él (guardar, traer filas) lo anterior
+  queda apagado a la vista.
 
 ## Filtro y orden (ui/results.py)
 - `ResultModel.all_rows` (todas) y `rows` (visibles). `set_filter(texto, columna)` con `make_matcher`:

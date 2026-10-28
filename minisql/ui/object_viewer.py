@@ -178,7 +178,8 @@ class ObjectViewer(QWidget):
             return
         self.running = True
         self.data_panel.set_busy("Cargando datos…" if not self.conn_tab.db.busy
-                                 else "Esperando a que termine la consulta en curso…", self.conn_tab.db.cancel)
+                                 else "Esperando a que termine la consulta en curso…", self.conn_tab.db.cancel,
+                                 skeleton=True)
         self.conn_tab.run_statement(self.data_sql, self.emitter, with_rowid=True)
 
     def _data_done(self, res):

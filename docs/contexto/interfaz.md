@@ -30,6 +30,10 @@ falla con `ScriptError`; `on_error` llama `refresh_pending`). 5. `show_running_s
 - `SqlEditor`: resaltado (highlighter.py), autocompletado (`CompletionProvider` en completion.py con caché
   de metadatos), F4 abre el objeto bajo el cursor. Resaltados por capas: `set_highlights(capa, selecciones)`
   con `LAYER_ORDER = ("run", "exec", "find", "find_current")`.
+- Al escribir (`SqlEditor.keyPressEvent`): `_upper_keyword` pasa a mayúsculas la palabra reservada (`SQL_KEYWORDS`)
+  al escribir un separador (`KEYWORD_END`), salvo en textos/comentarios, `alias.col` y `:bind`; `_auto_pair` cierra
+  ' ( [ {, salta el cierre ya escrito, envuelve la selección y Retroceso borra el par vacío. El autocompletado
+  inserta los nombres como en el diccionario (mayúsculas). Pruebas: `tests/test_autopair.py`.
 - `CodeEditor(SqlEditor)`: margen con números y breakpoints, `set_exec_line`, `set_debug_values`/`value_at`
   (tooltip con valor de variable), `go_to_line`.
 - `find_bar.py`: `with_find_bar(editor)` devuelve el contenedor; Ctrl+F, Ctrl+H, F3, Shift+F3, Esc.

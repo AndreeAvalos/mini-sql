@@ -30,12 +30,12 @@ def test_autocomplete(app):
     assert suggestions(app, sheet, "select 'em", manual=False) == []
 
 
-def test_insert_completion_keeps_case(app):
+def test_insert_completion_uses_dictionary_case(app):
     tab = ConnectionTab(make_session(FakeConn()), "T", "PROD")
     sheet = tab.current_sheet()
     suggestions(app, sheet, "select * from em")
     sheet.editor.insert_completion(sheet.editor.cmodel.index(0, 0))
-    assert sheet.editor.toPlainText() == "select * from emp e"
+    assert sheet.editor.toPlainText() == "select * from EMP e"          # como en el diccionario
 
 
 def test_table_completion_adds_alias(app):
@@ -43,13 +43,13 @@ def test_table_completion_adds_alias(app):
     sheet = tab.current_sheet()
     names = suggestions(app, sheet, "select * from em")
     sheet.editor.insert_completion(sheet.editor.cmodel.index(names.index("EMP"), 0))
-    assert sheet.editor.toPlainText() == "select * from emp e"
+    assert sheet.editor.toPlainText() == "select * from EMP e"
     names = suggestions(app, sheet, "select * from emp e join em")
     sheet.editor.insert_completion(sheet.editor.cmodel.index(names.index("EMPLEO"), 0))
-    assert sheet.editor.toPlainText() == "select * from emp e join empleo e2"
+    assert sheet.editor.toPlainText() == "select * from emp e join EMPLEO e2"
     names = suggestions(app, sheet, "select em")              # fuera del FROM: sin alias
     sheet.editor.insert_completion(sheet.editor.cmodel.index(names.index("EMP"), 0))
-    assert sheet.editor.toPlainText() == "select emp"
+    assert sheet.editor.toPlainText() == "select EMP"
 
 
 def test_column_completion_adds_alias(app):
@@ -59,7 +59,7 @@ def test_column_completion_adds_alias(app):
     names = suggestions(app, sheet, "select * from emp e join dept d on d.deptno = e.id\nwhere nom")
     assert names == ["NOMBRE"]
     ed.insert_completion(ed.cmodel.index(0, 0))
-    assert ed.toPlainText().endswith("where e.nombre")
+    assert ed.toPlainText().endswith("where e.NOMBRE")
     # columnas con el mismo nombre en dos tablas: una sugerencia por alias
     suggestions(app, sheet, "SELECT * FROM EMP E, EMP X WHERE ID")
     assert [ed.cmodel.item(i).text().split()[0] for i in range(ed.cmodel.rowCount())] == ["E.ID", "X.ID"]
@@ -68,4 +68,4 @@ def test_column_completion_adds_alias(app):
     # sin alias, la columna va sola
     suggestions(app, sheet, "select * from emp where nom")
     ed.insert_completion(ed.cmodel.index(0, 0))
-    assert ed.toPlainText() == "select * from emp where nombre"
+    assert ed.toPlainText() == "select * from emp where NOMBRE"

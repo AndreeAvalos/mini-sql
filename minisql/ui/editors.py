@@ -1,6 +1,7 @@
 """Editores de texto: SQL con autocompletado y código PL/SQL con margen y breakpoints."""
 
 import re
+from typing import ClassVar
 
 from PySide6.QtCore import QEvent, QModelIndex, QPoint, QRect, Qt, Signal
 from PySide6.QtGui import (
@@ -17,7 +18,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QCompleter, QPlainTextEdit, QTextEdit, QToolTip, QWidget
 
 from ..sql.completion import completion_target, make_alias, table_refs, wants_alias
-from ..sql.text import inside_literal, q, statement_range, word_at
+from ..sql.text import SQL_KEYWORDS, inside_literal, q, statement_range, word_at
 from .highlighter import SqlHighlighter
 from .style import font_zoom, is_dark, mono_font
 from .theme import THEMES
@@ -28,11 +29,11 @@ class SqlEditor(QPlainTextEdit):
     2 letras o un punto, o con Ctrl+Espacio). Sin provider no autocompleta."""
     NAME_ROLE = Qt.UserRole + 1
     IDENT_ROLE = Qt.UserRole + 2
-    LOWER_ROLE = Qt.UserRole + 3
     TABLE_ROLE = Qt.UserRole + 4
     QUAL_ROLE = Qt.UserRole + 5
     TABLE_KINDS = frozenset({"tabla", "vista", "vista mat.", "sinónimo"})
     MIN_PREFIX = 2
+    KEYWORD_END = " \t\r\n(),;"          # al escribir uno de estos, la palabra anterior ya está completa
 
     def __init__(self, provider=None):
         super().__init__()
@@ -88,6 +89,11 @@ class SqlEditor(QPlainTextEdit):
             if self.provider is not None:
                 self.show_completions(manual=True)
             return
+        if (e.text() and e.text() in self.KEYWORD_END) or e.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Tab):
+            self._upper_keyword()                    # select␣ → SELECT␣ (antes de escribir el separador)
+        if self._auto_pair(e):
+            self.hide_completions()
+            return
         super().keyPressEvent(e)
         if self.provider is None or e.modifiers() & (Qt.ControlModifier | Qt.AltModifier):
             return
@@ -98,6 +104,84 @@ class SqlEditor(QPlainTextEdit):
             self.show_completions(manual=False)
         elif text or e.key() in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Home, Qt.Key_End):
             self.hide_completions()
+
+    # --- palabras reservadas en mayúsculas al terminar de escribirlas (select → SELECT)
+    def _upper_keyword(self):
+        """Si justo antes del cursor hay una palabra reservada en minúsculas, la pasa a mayúsculas. No toca
+        textos, comentarios, alias.columna ni :binds."""
+        if self.isReadOnly():
+            return
+        cur = self.textCursor()
+        if cur.hasSelection():
+            return
+        text, pos = self.toPlainText(), cur.position()
+        m = re.search(r"(?<![\w$#.:\"])[A-Za-z_][\w$#]*$", text[max(0, pos - 40):pos])
+        if not m:
+            return
+        word = m.group()
+        if word == word.upper() or word.upper() not in SQL_KEYWORDS:
+            return
+        start = pos - len(word)
+        if inside_literal(text[statement_range(text, start)[0]:start]):
+            return
+        cur.setPosition(start)
+        cur.setPosition(pos, QTextCursor.KeepAnchor)
+        cur.insertText(word.upper())
+        self.setTextCursor(cur)
+
+    # --- cierre automático de ' ( [ {
+    PAIRS: ClassVar[dict] = {"(": ")", "[": "]", "{": "}", "'": "'"}
+    # después de estos se puede abrir un par sin estorbar (no en medio de una palabra)
+    PAIR_BEFORE = " \t\n)]};,"
+
+    def _auto_pair(self, e):
+        """Escribe el cierre del par, salta el cierre que ya está, envuelve la selección y borra el par vacío
+        con Retroceso. True si se encargó de la tecla."""
+        if self.isReadOnly() or e.modifiers() & (Qt.ControlModifier | Qt.AltModifier):
+            return False
+        cur = self.textCursor()
+        text = self.toPlainText()
+        pos = cur.position()
+        prev, nxt = text[pos - 1:pos], text[pos:pos + 1]
+        if e.key() == Qt.Key_Backspace and not cur.hasSelection():
+            if prev in self.PAIRS and nxt == self.PAIRS[prev]:          # (|) → |
+                cur.movePosition(QTextCursor.Left)
+                cur.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, 2)
+                cur.removeSelectedText()
+                self.setTextCursor(cur)
+                return True
+            return False
+        key = e.text()
+        if len(key) != 1:
+            return False
+        if cur.hasSelection() and key in self.PAIRS:                    # envolver lo seleccionado
+            start, end = cur.selectionStart(), cur.selectionEnd()
+            inner = cur.selectedText().replace(chr(0x2029), chr(10))      # Qt separa los párrafos con U+2029
+            cur.beginEditBlock()
+            cur.insertText(key + inner + self.PAIRS[key])
+            cur.endEditBlock()
+            cur.setPosition(start + 1)
+            cur.setPosition(end + 1, QTextCursor.KeepAnchor)
+            self.setTextCursor(cur)
+            return True
+        if key in ")]}'" and nxt == key and (                           # el cierre ya está: pasar por encima
+                key != "'" or inside_literal(text[statement_range(text, pos)[0]:pos])):
+            cur.movePosition(QTextCursor.Right)
+            self.setTextCursor(cur)
+            return True
+        if key not in self.PAIRS or cur.hasSelection():
+            return False
+        if nxt and nxt not in self.PAIR_BEFORE:                         # pegado a una palabra: tal cual
+            return False
+        before = text[statement_range(text, pos)[0]:pos]
+        if inside_literal(before):                                      # dentro de un texto: tal cual
+            return False
+        if key == "'" and prev and (prev.isalnum() or prev in "_'"):    # O'Brien, o el '' de un texto
+            return False
+        cur.insertText(key + self.PAIRS[key])
+        cur.movePosition(QTextCursor.Left)
+        self.setTextCursor(cur)
+        return True
 
     def hide_completions(self):
         self.waiting = None
@@ -130,14 +214,12 @@ class SqlEditor(QPlainTextEdit):
             return
         shown = [(f"{qual}.{name}" if qual else name) for name, _d, _i, qual in items]
         width = min(max(len(s) for s in shown), 40)
-        lower = self._prefers_lower(before)
         self.cmodel.clear()
         for label, (name, detail, ident, qual) in zip(shown, items, strict=True):
             it = QStandardItem(f"{label.ljust(width)}  {detail}")
             it.setData(name, self.NAME_ROLE)
             it.setData(qual, self.QUAL_ROLE)
             it.setData(ident, self.IDENT_ROLE)
-            it.setData(lower, self.LOWER_ROLE)
             it.setData(ident and detail in self.TABLE_KINDS, self.TABLE_ROLE)
             it.setEditable(False)
             self.cmodel.appendRow(it)
@@ -148,22 +230,12 @@ class SqlEditor(QPlainTextEdit):
         self.completer.complete(rect)
         popup.setCurrentIndex(self.cmodel.index(0, 0))
 
-    @staticmethod
-    def _prefers_lower(before):
-        """Si el usuario escribe en minúsculas, insertar en minúsculas."""
-        m = re.search(r"([A-Za-z_][\w$#]*)\.?[\w$#]*$", before)
-        word = re.search(r"[A-Za-z]+[\w$#]*$", before)
-        sample = (word.group() if word else "") or (m.group(1) if m else "")
-        return bool(sample) and sample.islower()
-
     def insert_completion(self, index):
         name = index.data(self.NAME_ROLE)
         if not name:
             return
         if index.data(self.IDENT_ROLE):
-            name = q(name)
-        if index.data(self.LOWER_ROLE) and not name.startswith('"'):
-            name = name.lower()
+            name = q(name)                   # como en el diccionario (EMP, NOMBRE…), aunque se escriba en minúsculas
         if index.data(self.QUAL_ROLE):
             name = f"{index.data(self.QUAL_ROLE)}.{name}"     # where fec -> where e.fecha
         cur = self.textCursor()

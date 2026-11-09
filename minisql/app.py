@@ -28,6 +28,9 @@ def main():
         from .selftest import run
         sys.exit(run())
 
+    from . import errorlog
+    errorlog.start()                       # si se cierra de golpe, el motivo queda en ~/.minisql/errores.log
+
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     from .ui.main_window import MainWindow

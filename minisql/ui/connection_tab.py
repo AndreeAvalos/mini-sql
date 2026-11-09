@@ -306,7 +306,8 @@ class ConnectionTab(QWidget):
             except Exception as e:
                 if connection_lost(e) and self.db.connected:
                     self.db.connected = False
-                    self._lost.emit(str(e).splitlines()[0])
+                    lines = str(e).splitlines() or [""]       # la línea del error que cortó la sesión, no la ayuda
+                    self._lost.emit(next((ln for ln in lines if connection_lost(ln)), lines[0]))
                 raise
         return run
 

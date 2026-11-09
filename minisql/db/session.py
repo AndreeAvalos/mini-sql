@@ -43,8 +43,9 @@ class RemoteLobError(Exception):
 
 
 # Errores de una columna LOB (BLOB/CLOB) traída por un dblink: ORA-22992 es el clásico; con el modo thin y los LOB
-# pedidos como bytes/texto, la base remota responde ORA-03149 ("código de error no válido"). Pedidos como referencia,
-# algunas bases remotas mandan un locator que el modo thin no sabe leer (DPY-5002, "internal error: read integer…").
+# pedidos como bytes/texto, la base remota responde ORA-03149 ("código de error no válido"). No se reintenta pidiendo
+# el LOB como referencia (locator): el modo thin no entiende el locator remoto (DPY-5002) y ese error interno deja
+# la conexión desincronizada, así que todo lo que sigue en ella falla.
 REMOTE_LOB_CODES = ("ORA-03149", "ORA-22992", "DPY-5002")
 REMOTE_LOB_HELP = ("La base remota rechazó la consulta y su mensaje no llegó por el dblink. Suele ser:\n"
                    "• una columna BLOB/CLOB que el dblink no deja leer: quítala del SELECT (en vez de *, lista las "
@@ -57,52 +58,44 @@ def remote_lob_error(error, sql):
     return any(code in str(error) for code in REMOTE_LOB_CODES) and "@" in blank_literals(sql)
 
 
-def lob_locators(cursor, metadata):
-    """outputtypehandler: los LOB llegan como referencia (LOB), que sí cruzan el dblink en Oracle 12.2+."""
-    if metadata.type_code in LOB_TYPES:
-        return cursor.var(metadata.type_code, arraysize=cursor.arraysize)
-    return None
+# Tipos que no cruzan el dblink y cómo se llaman en el aviso. Con fetch_lobs=False python-oracledb describe los BLOB
+# como LONG RAW y los CLOB/NCLOB como LONG / LONG NVARCHAR (los trae como bytes/texto): hay que buscar esos también.
+LOB_TYPES = {
+    oracledb.DB_TYPE_BLOB: "BLOB", oracledb.DB_TYPE_LONG_RAW: "BLOB",
+    oracledb.DB_TYPE_CLOB: "CLOB", oracledb.DB_TYPE_LONG: "CLOB",
+    oracledb.DB_TYPE_NCLOB: "NCLOB", oracledb.DB_TYPE_LONG_NVARCHAR: "NCLOB",
+}
 
 
-LOB_TYPES = (oracledb.DB_TYPE_BLOB, oracledb.DB_TYPE_CLOB, oracledb.DB_TYPE_NCLOB)
+class CannotRewrite(Exception):
+    """No se pudo armar la consulta sin LOB; el mensaje dice por qué."""
 
 
 def without_lobs(cur, sql):
     """La misma consulta con cada columna BLOB/CLOB cambiada por un aviso, para ver el resto de las columnas
-    cuando el LOB no cruza el dblink de ninguna forma. None si no se puede armar (sin LOB, nombres repetidos…)."""
+    cuando el LOB no cruza el dblink. Lanza CannotRewrite si no se puede (sin LOB, nombres repetidos…).
+    Las columnas se averiguan con parse (Oracle solo describe la consulta, no la ejecuta): ejecutarla, aunque sea
+    sin filas, define los LOB y por el dblink eso falla (como bytes: ORA-03149) o desordena la conexión (como
+    referencia: el modo thin no entiende el locator remoto y la sesión termina cayéndose)."""
     try:
-        cur.execute(f"select * from (\n{sql}\n) where 1 = 0")      # solo la descripción, sin traer filas
+        cur.parse(sql)
         columns = [(d[0], d[1]) for d in cur.description or ()]
-    except Exception:
-        return None
+    except Exception as e:
+        raise CannotRewrite(f"No se pudieron ver las columnas de la consulta: {e}") from e
     names = [name for name, _ in columns]
-    if not any(t in LOB_TYPES for _, t in columns) or len(set(names)) != len(names):
-        return None
+    if not any(t in LOB_TYPES for _, t in columns):
+        raise CannotRewrite("La consulta no trae columnas BLOB/CLOB: el error viene de la base remota (por ejemplo "
+                            "un tipo de dato, una columna o tabla que no existe allá, o permisos).")
+    if len(set(names)) != len(names):
+        raise CannotRewrite("La consulta tiene columnas con el mismo nombre: ponles un alias distinto.")
 
     def column(name, dtype):
         ident = '"' + name.replace('"', '""') + '"'
         if dtype in LOB_TYPES:
-            kind = dtype.name.replace("DB_TYPE_", "")
-            return f"'<{kind}: no se puede leer por el dblink>' as {ident}"
+            return f"'<{LOB_TYPES[dtype]}: no se puede leer por el dblink>' as {ident}"
         return ident
 
     return f"select {', '.join(column(n, t) for n, t in columns)}\nfrom (\n{sql}\n)"
-
-
-def read_lobs(*row):
-    """rowfactory: cada referencia LOB se lee y queda como bytes/texto, igual que el resto de los resultados.
-    Si el dblink tampoco deja leerla, la celda lo dice y el resto de la fila se ve igual."""
-    return tuple(_read_lob(v) for v in row)
-
-
-def _read_lob(value):
-    if isinstance(value, (str, bytes)) or not hasattr(value, "read"):
-        return value
-    try:
-        return value.read()
-    except Exception:
-        kind = getattr(getattr(value, "type", None), "name", "LOB").replace("DB_TYPE_", "")
-        return f"<{kind} no se pudo leer por el dblink>"
 
 
 class ScriptError(Exception):
@@ -358,34 +351,29 @@ class OracleSession:
     @staticmethod
     def _run(cur, sql, kw):
         cur.arraysize = PAGE_ROWS
+        if kw in ("SELECT", "WITH") and "@" in blank_literals(sql):
+            # Consulta por dblink: antes de ejecutarla se describe (parse, sin ejecutar). Si trae BLOB/CLOB se corre
+            # ya sin ellos: ejecutarla con el LOB da ORA-03149 y ese error, repetido, termina tirando la sesión.
+            with contextlib.suppress(CannotRewrite):
+                sql = without_lobs(cur, sql)
         try:
             cur.execute(sql)
             rows = cur.fetchmany(PAGE_ROWS) if cur.description else None
         except Exception as e:
             if not remote_lob_error(e, sql):
                 raise
-            # Un BLOB/CLOB por un dblink: la base remota no deja convertirlo a bytes/texto (fetch_lobs=False)
-            # y responde ORA-03149 o ORA-22992. Se repite pidiendo el LOB como referencia y leyéndolo aparte.
-            cur.outputtypehandler = lob_locators
-            cur.rowfactory = read_lobs
+            # Un BLOB/CLOB por un dblink: la base remota no deja traerlo (ORA-03149 / ORA-22992). Se repite la
+            # consulta con cada LOB cambiado por un aviso: el resto de las columnas se ve igual.
             try:
-                cur.execute(sql)
-                rows = cur.fetchmany(PAGE_ROWS) if cur.description else None
-            except Exception as again:
-                if not remote_lob_error(again, sql):
-                    raise
-                # Tampoco como referencia (p. ej. DPY-5002: el modo thin no entiende el locator remoto):
-                # se muestran las demás columnas y el LOB queda como un aviso.
-                cur.outputtypehandler = None
-                cur.rowfactory = None
                 plain = without_lobs(cur, sql)
-                if plain is None:
-                    raise RemoteLobError(REMOTE_LOB_HELP + f"\n\n{again}") from again
-                try:
-                    cur.execute(plain)
-                    rows = cur.fetchmany(PAGE_ROWS) if cur.description else None
-                except Exception as last:
-                    raise RemoteLobError(REMOTE_LOB_HELP + f"\n\n{again}") from last
+            except CannotRewrite as why:
+                raise RemoteLobError(f"{REMOTE_LOB_HELP}\n\n{e}\n\nMiniSQL no pudo mostrar las demás columnas. "
+                                     f"{why}") from e
+            try:
+                cur.execute(plain)
+                rows = cur.fetchmany(PAGE_ROWS) if cur.description else None
+            except Exception as last:
+                raise RemoteLobError(REMOTE_LOB_HELP + f"\n\n{e}\n{last}") from last
         if cur.description:
             return {
                 "headers": [d[0] for d in cur.description],

@@ -48,6 +48,9 @@ falla con `ScriptError`; `on_error` llama `refresh_pending`). 5. `show_running_s
 - `style.py`: `mono_font`, `is_dark`, `StatusLabel`, `RESULT_THEME` (claro/oscuro) y `result_stylesheet`.
 - `connect_dialog.py`: perfiles (`config.load_profiles`), contraseña en keyring (`KEYRING_SERVICE`),
   tnsnames. Las pruebas lo reemplazan con `monkeypatch.setattr(main_window, "ConnectDialog", ...)`.
+- `errorlog.py`: `start()` en `app.main` → ~/.minisql/errores.log (rota a errores.old.log pasado 1 MB): excepciones
+  no controladas (`sys.excepthook`, `threading.excepthook`, también las de slots de Qt) y caídas nativas con
+  `faulthandler`. Es lo primero que hay que pedir cuando "se cierra solo". Pruebas: `tests/test_errorlog.py`.
 - `app.py`: `single_instance_lock()` (QLockFile en ~/.minisql/minisql.lock) y `main()`.
 
 ## Reglas

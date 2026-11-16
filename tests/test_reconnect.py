@@ -125,3 +125,58 @@ def test_failed_reconnect_keeps_it_disconnected(app, tmp_path, monkeypatch):
     tab.reconnect()
     assert wait_until(app, lambda: warned)
     assert not tab.connected and "ORA-01017" in warned[0] and "Sin conexión" in tab.conn_state.text()
+
+
+def test_rollback_on_a_dead_session_does_not_block_closing(app, tmp_path, monkeypatch):
+    """La sesión murió sin que MiniSQL se enterara: el Rollback falla por la red. No puede quedar en un ciclo
+    (no deja cerrar por los cambios, y no se pueden deshacer sin conexión)."""
+    _w, tab = window_with_connection(tmp_path)
+    tab.set_pending(True)
+    warned = []
+    monkeypatch.setattr(tab_module.QMessageBox, "warning", staticmethod(lambda *a, **k: warned.append(a[2])))
+
+    def dead():
+        raise RuntimeError("DPY-4011: the database or network closed the connection")
+    monkeypatch.setattr(tab.db, "rollback", dead)
+    assert tab.rollback()                                            # resuelto: Oracle ya los deshizo
+    assert not tab.connected and not tab.pending and "DPY-4011" in warned[0]
+    assert tab.close_connection()                                    # y se puede cerrar
+
+
+def test_rollback_without_connection_clears_the_pending_changes(app, tmp_path, monkeypatch):
+    _w, tab = window_with_connection(tmp_path)
+    tab.db.connected = False                                         # ya marcada como desconectada
+    tab.set_pending(True)
+    warned = []
+    monkeypatch.setattr(tab_module.QMessageBox, "warning", staticmethod(lambda *a, **k: warned.append(a[2])))
+    assert tab.rollback() and not tab.pending and "ya se perdieron" in warned[0]
+
+
+def test_failed_rollback_while_closing_offers_a_way_out(app, tmp_path, monkeypatch):
+    _w, tab = window_with_connection(tmp_path)
+    tab.set_pending(True)
+    monkeypatch.setattr(tab, "rollback", lambda: False)             # p. ej. un error de Oracle
+    answers = []
+
+    class Box:                                                       # elige "Rollback y cerrar"
+        Warning, AcceptRole, DestructiveRole, RejectRole = 0, 0, 1, 2
+
+        def __init__(self, *_a):
+            self.buttons = []
+
+        def __getattr__(self, _name):
+            return lambda *a, **k: None
+
+        def addButton(self, text, _role):
+            self.buttons.append(text)
+            return text
+
+        def exec(self):
+            return 0
+
+        def clickedButton(self):
+            return next(b for b in self.buttons if b.startswith("Rollback"))
+    monkeypatch.setattr(tab_module, "QMessageBox", Box)
+    monkeypatch.setattr(tab, "_ask", lambda title, text, yes, no: answers.append(yes) or True)
+    assert tab._resolve_pending("cerrar")                            # "Cerrar de todas formas"
+    assert answers == ["Cerrar de todas formas"] and not tab.pending

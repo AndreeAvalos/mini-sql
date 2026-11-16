@@ -3,7 +3,6 @@ import re
 import threading
 import time
 
-import oracledb
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -367,9 +366,21 @@ class ConnectionTab(QWidget):
         except SessionBusy as e:
             QMessageBox.information(self, "Ocupado", str(e))
             return False
-        except oracledb.Error as e:
-            QMessageBox.critical(self, f"Error en {label}", str(e))
-            return False
+        except Exception as e:
+            if not connection_lost(e):
+                QMessageBox.critical(self, f"Error en {label}", str(e))
+                return False
+            # Sin sesión no hay nada que confirmar ni deshacer: Oracle ya deshizo los cambios al cortarse. Se
+            # avisa y se da por resuelto; si no, cerrar con cambios pendientes quedaría en un ciclo sin salida.
+            if self.db.connected:
+                self.db.connected = False
+                self._on_lost(next((ln for ln in str(e).splitlines() if connection_lost(ln)), str(e)))
+            elif self.pending:
+                self.set_pending(False)
+                QMessageBox.warning(self, f"{label} sin conexión",
+                                    f"{self.name} no tiene conexión: los cambios sin confirmar ya se perdieron "
+                                    "(Oracle los deshizo al cortarse la sesión).")
+            return True
         self.set_pending(False)
         self.transaction_ended.emit(label)
         return True
@@ -516,10 +527,22 @@ class ConnectionTab(QWidget):
         box.addButton("Cancelar", QMessageBox.RejectRole)
         box.exec()
         if box.clickedButton() == commit_b:
-            return self.commit()
-        if box.clickedButton() == rollback_b:
-            return self.rollback()
-        return False
+            done = self.commit()
+        elif box.clickedButton() == rollback_b:
+            done = self.rollback()
+        else:
+            return False
+        if done:
+            return True
+        # Commit/Rollback falló (sesión trabada, error de Oracle…): que siempre haya una salida
+        if not self._ask("No se pudo terminar la transacción",
+                         f"No se pudo hacer {'Commit' if box.clickedButton() == commit_b else 'Rollback'} en "
+                         f"{self.name}.\n\n¿{verb.capitalize()} de todas formas? Se corta la sesión y Oracle deshace "
+                         "(Rollback) los cambios sin confirmar.", f"{verb.capitalize()} de todas formas", "Volver"):
+            return False
+        self.db.close()
+        self.set_pending(False)
+        return True
 
     # --- desconectar y reconectar
     @property
